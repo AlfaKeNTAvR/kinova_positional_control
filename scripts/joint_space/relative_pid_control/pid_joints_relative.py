@@ -1,13 +1,18 @@
 #!/usr/bin/env python
 
 import rospy
+import math
+
 from std_msgs.msg import *
 from kortex_driver.srv import *
 from kortex_driver.msg import *
 from sensor_msgs.msg import JointState
-from relaxed_ik_ros1.msg import JointAngles
 
-import math
+
+def init_pos_cb(data):
+    global start_abs_pos    
+    start_abs_pos = data.position[0:7]
+
 
 # Get current relative joint positions
 def feedback_callback(data):
@@ -53,6 +58,7 @@ def feedback_callback(data):
     state_5.publish(current_rel_pos[4])
     state_6.publish(current_rel_pos[5])
     state_7.publish(current_rel_pos[6])
+ 
     
 # Update joint velocities
 def control_effort_callback_1(data):
@@ -88,13 +94,14 @@ def control_effort_callback_7(data):
 def relative_setpoint_callback(data):
     global goal_abs_pos, goal_rel_pos, current_abs_pos, start_abs_pos, continuous_joint_indices
 
-    #goal_rel_pos = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-
     # Goal absolute coordinates input
-    goal_abs_pos = data.data.split("_")
-
-    for i in range(len(goal_abs_pos)):
-        goal_abs_pos[i] = math.radians(float(goal_abs_pos[i]))
+    goal_abs_pos[0] = data.joint_angles[0].value
+    goal_abs_pos[1] = data.joint_angles[1].value
+    goal_abs_pos[2] = data.joint_angles[2].value
+    goal_abs_pos[3] = data.joint_angles[3].value
+    goal_abs_pos[4] = data.joint_angles[4].value
+    goal_abs_pos[5] = data.joint_angles[5].value
+    goal_abs_pos[6] = data.joint_angles[6].value
 
     # Set origin positions
     start_abs_pos = current_abs_pos
@@ -117,11 +124,6 @@ def relative_setpoint_callback(data):
         else:
             goal_rel_pos[joint_index] = goal_abs_pos[joint_index] - current_abs_pos[joint_index]
 
-        # print(math.degrees(goal_abs_pos[joint_index]), math.degrees(current_pos[joint_index]), math.degrees(goal_rel_pos[joint_index]))
-        # print("Joint:", joint_index, "Goal:", round(goal_abs_pos[joint_index], 3), "Current:", round(current_abs_pos[joint_index], 3), "Relative:", round(goal_rel_pos[joint_index], 3))
-
-    # print()
-
 
 if __name__ == '__main__':
     # Initialize the node
@@ -142,7 +144,11 @@ if __name__ == '__main__':
     current_abs_pos = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     # Abs joint positions at the moment of setting a new goal. Relative current joint positions are relative to these positions
-    start_abs_pos = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
+    #Subscribe to get current joint states
+    start_abs_pos = [] 
+    while not rospy.is_shutdown():  
+        rospy.Subscriber('/my_gen3/base_feedback/joint_state', JointState, init_pos_cb)
+        break
 
     # Publishing
     state_1 = rospy.Publisher('/joint_1/state', Float64, queue_size=1)
