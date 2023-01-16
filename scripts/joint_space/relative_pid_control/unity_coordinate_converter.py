@@ -10,29 +10,6 @@ from relaxed_ik_ros1.msg import EEPoseGoals
 import geometry_msgs.msg as geom_msgs
 from kortex_driver.msg import *
 
-# Rotation matrix about the x-axis  
-def Rx(theta):
-    theta = math.radians(theta)
-    return np.matrix([[1, 0, 0],
-                      [0, math.cos(theta),-math.sin(theta)],
-                      [0, math.sin(theta), math.cos(theta)]])
-
-
-# Rotation matrix about the y-axis  
-def Ry(theta):
-    theta = math.radians(theta)
-    return np.matrix([[ math.cos(theta), 0, math.sin(theta)],
-                      [0, 1, 0],
-                      [-math.sin(theta), 0, math.cos(theta)]])
-
-
-# Rotation matrix about the z-axis  
-def Rz(theta):
-    theta = math.radians(theta)
-    return np.matrix([[math.cos(theta), -math.sin(theta), 0],
-                      [math.sin(theta), math.cos(theta) , 0],
-                      [0, 0, 1 ]])
-
 
 # Right controller topic callback function
 # Callback function that subscribes to the xyz left controller positions
@@ -44,22 +21,18 @@ def right_callback(data):
     # Then swap x and new y (which was z) to have x facing forward
     # Negate new y (which is x) to make it align with a global coordinate system
     input_pos_gcs = np.array([data.controller_pos_z, -1 * data.controller_pos_x, data.controller_pos_y])
-    input_rot_gcs = np.array([data.controller_rot_x, data.controller_rot_y, data.controller_rot_z, data.controller_rot_w])
+
+    # Transition from Left-handed CS (Unity) to Right-handed CS (Global)
+    input_rot_gcs = np.array([data.controller_rot_z, data.controller_rot_x, -1 * data.controller_rot_y, -1 * data.controller_rot_w])
 
     # Transition from Global CS to Kinova CS: rotate around y and z axis
-    R_gcs_to_kcs = Rx(0) * Ry(-45) * Rz(-90)
-    input_pos_kcs = np.matmul(R_gcs_to_kcs, input_pos_gcs)
+    origin, xaxis, yaxis, zaxis = (0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)
+    Rx = T.rotation_matrix(math.radians(0.0), xaxis)
+    Ry = T.rotation_matrix(math.radians(-45.0), yaxis)
+    Rz = T.rotation_matrix(math.radians(-90.0), zaxis)
 
-    # TODO: use transformations library
-    # origin, xaxis, yaxis, zaxis = (0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)
-    # Rx = T.rotation_matrix(0.0, xaxis)
-    # Ry = T.rotation_matrix(45.0, yaxis)
-    # Rz = T.rotation_matrix(-90.0, zaxis)
-    # R_gcs_to_kcs = T.concatenate_matrices(Rx, Ry, Rz)
-    
-    # Parse input_pos_array from a 2D to a 1D array
-    temp_array = input_pos_kcs
-    input_pos_kcs = [temp_array[0,0], temp_array[0,1], temp_array[0,2]]
+    R_gcs_to_kcs = T.concatenate_matrices(Rx, Ry, Rz)[0:3,0:3]
+    input_pos_kcs = np.matmul(R_gcs_to_kcs, input_pos_gcs)
     
     # Start tracking if gripButton was pressed
     if data.gripButton == True:
@@ -117,6 +90,8 @@ def right_callback(data):
         # Reset the flag
         onTrackingStart = True
 
+        # TODO: stop any robot motion
+
 
 # Callback function that subscribes to the end effector positions
 def ee_position_callback(data):
@@ -131,6 +106,52 @@ def ee_position_callback(data):
     # Calculate a transition from relaxedIK initial absolute postion (0, 0, 0) to KinovaFK on startup
     # ! ! ! Requires relaxedIK homing ! ! !
     if onStartup == True:
+
+        # # Homing position
+        # ja_init = JointAngles()
+
+        # init_joint_1 = JointAngle()
+        # init_joint_1.joint_identifier = 0
+        # init_joint_1.value = -0.06562561558173297
+        # ja_init.joint_angles.append(init_joint_1)
+
+        # init_joint_2 = JointAngle()
+        # init_joint_2.joint_identifier = 1
+        # init_joint_2.value = 1.8538876875092294
+        # ja_init.joint_angles.append(init_joint_2)
+
+        # init_joint_3 = JointAngle()
+        # init_joint_3.joint_identifier = 2
+        # init_joint_3.value = -3.1234911476605247
+        # ja_init.joint_angles.append(init_joint_3)
+
+        # init_joint_4 = JointAngle()
+        # init_joint_4.joint_identifier = 3
+        # init_joint_4.value = -0.5407607182949867
+        # ja_init.joint_angles.append(init_joint_4)
+
+        # init_joint_5 = JointAngle()
+        # init_joint_5.joint_identifier = 4
+        # init_joint_5.value = 1.6008414444228978
+        # ja_init.joint_angles.append(init_joint_5)
+
+        # init_joint_6 = JointAngle()
+        # init_joint_6.joint_identifier = 5
+        # init_joint_6.value = 1.5267517702646756
+        # ja_init.joint_angles.append(init_joint_6)
+
+        # init_joint_7 = JointAngle()
+        # init_joint_7.joint_identifier = 6
+        # init_joint_7.value = 1.5836379564132042
+        # ja_init.joint_angles.append(init_joint_7)
+
+        # angles_pub.publish(ja_init)
+
+        # print("Kinova is homing...")
+        # # rospy.sleep(30)
+        # print("Homed")
+
+        # Calculate the difference after homing
         relaxedik_kinova_diff = np.array([0.0, 0.0, 0.0]) - ee_array
 
         # Remove the flag
@@ -166,6 +187,7 @@ if __name__ == '__main__':
 
     # Publishing
     setpoint = rospy.Publisher('/relaxed_ik/ee_pose_goals', EEPoseGoals, queue_size=1)
+    angles_pub = rospy.Publisher('/relaxed_ik/joint_angle_solutions', JointAngles, queue_size=10)
 
     # Subscribing
     # rospy.Subscriber("leftHandInfo", HandTracking, left_callback)
