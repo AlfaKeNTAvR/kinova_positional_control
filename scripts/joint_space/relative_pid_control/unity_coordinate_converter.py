@@ -17,13 +17,11 @@ def right_callback(data):
     global input_pos_kcs, oculus_kinova_diff, relaxedik_kinova_diff
     global onTrackingStart
 
+    # # POSITION
     # Transition from Left-handed CS (Unity) to Right-handed CS (Global): swap y and z axis
     # Then swap x and new y (which was z) to have x facing forward
     # Negate new y (which is x) to make it align with a global coordinate system
     input_pos_gcs = np.array([data.controller_pos_z, -1 * data.controller_pos_x, data.controller_pos_y])
-
-    # Transition from Left-handed CS (Unity) to Right-handed CS (Global)
-    input_rot_gcs = np.array([data.controller_rot_z, data.controller_rot_x, -1 * data.controller_rot_y, -1 * data.controller_rot_w])
 
     # Transition from Global CS to Kinova CS: rotate around y and z axis
     origin, xaxis, yaxis, zaxis = (0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)
@@ -31,8 +29,28 @@ def right_callback(data):
     Ry = T.rotation_matrix(math.radians(-45.0), yaxis)
     Rz = T.rotation_matrix(math.radians(-90.0), zaxis)
 
-    R_gcs_to_kcs = T.concatenate_matrices(Rx, Ry, Rz)[0:3,0:3]
-    input_pos_kcs = np.matmul(R_gcs_to_kcs, input_pos_gcs)
+    R_gcs_to_kcs = T.concatenate_matrices(Rx, Ry, Rz)
+    input_pos_kcs = np.matmul(R_gcs_to_kcs[0:3,0:3], input_pos_gcs)
+
+
+    # # ORIENTATION
+    # Raw quaternion input (Left-handed CS)
+    input_rot_gcs = np.array([data.controller_rot_x, data.controller_rot_y, data.controller_rot_z, data.controller_rot_w])
+    
+    # Transition from Left-handed CS (Unity) to Right-handed CS (Global)
+    input_rot_gcs = T.euler_from_quaternion(input_rot_gcs)
+    input_rot_gcs = T.euler_matrix(-1 * input_rot_gcs[1], -1 * input_rot_gcs[2], input_rot_gcs[0])
+    input_rot_gcs = T.quaternion_from_matrix(input_rot_gcs)
+
+    # More comfortable position (compensation)
+    Qy = T.quaternion_about_axis(math.radians(35), yaxis)
+    input_rot_gcs = T.quaternion_multiply(input_rot_gcs, Qy)
+
+    Qz = T.quaternion_about_axis(math.radians(15), zaxis)
+    input_rot_gcs = T.quaternion_multiply(input_rot_gcs, Qz)
+
+    # Transition from Global CS to Kinova CS: rotate around y and z axis
+    input_rot_kcs = np.matmul(R_gcs_to_kcs, input_rot_gcs)
     
     # Start tracking if gripButton was pressed
     if data.gripButton == True:
@@ -60,10 +78,10 @@ def right_callback(data):
         pose_r.position.z = target_pos_kcs[2]
 
         # TODO: add orientation support
-        pose_r.orientation.w = 1
-        pose_r.orientation.x = 0
-        pose_r.orientation.y = 0
-        pose_r.orientation.z = 0
+        pose_r.orientation.x = input_rot_kcs[0]
+        pose_r.orientation.y = input_rot_kcs[1]
+        pose_r.orientation.z = input_rot_kcs[2]
+        pose_r.orientation.w = input_rot_kcs[3]
 
         # TODO: Form a message for relaxedIK (left arm)
         pose_l = geom_msgs.Pose()
@@ -71,10 +89,10 @@ def right_callback(data):
         pose_l.position.y = 0
         pose_l.position.z = 0
 
-        pose_l.orientation.w = 1
         pose_l.orientation.x = 0
         pose_l.orientation.y = 0
         pose_l.orientation.z = 0
+        pose_l.orientation.w = 1
 
         # Form full message for relaxedIK
         ee_pose_goals = EEPoseGoals()
