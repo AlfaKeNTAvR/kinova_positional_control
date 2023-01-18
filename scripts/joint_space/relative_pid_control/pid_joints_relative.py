@@ -7,71 +7,88 @@ from std_msgs.msg import *
 from kortex_driver.srv import *
 from kortex_driver.msg import *
 from sensor_msgs.msg import JointState
-
-
-def init_pos_cb(data):
-    global start_abs_pos    
-    start_abs_pos = data.position[0:7]
+from kinova_positional_control.srv import *
 
 
 # Get current relative joint positions
 def feedback_callback(data):
     global current_abs_pos, start_abs_pos, continuous_joint_indices
+    global isInitialized, kinovaInitialized
 
-    # Current relative joint positions
-    current_rel_pos = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    # Set kinovaInitialized flag once feedback is received
+    kinovaInitialized = True
 
-    # Current absolute joint positions
-    current_abs_pos = data.position
+    # Update start_abs_pos from zero to current arm position on initialization
+    if not isInitialized:
+        start_abs_pos = data.position
 
-    '''
-    Recalculate joint feedback to be relative to the starting absolute position, where start_abs_pos is relative origin (zero).
+    else:
+        # Current relative joint positions
+        current_rel_pos = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-    BUG: if the joint overshoots at 180 commanded relative position it might get stuck in the infinite 360 loop (keep rotating).
-    '''
+        # Current absolute joint positions
+        current_abs_pos = data.position
 
-    for joint_index in range(7):
+        '''
+        Recalculate joint feedback to be relative to the starting absolute position, where start_abs_pos is relative origin (zero).
 
-        # Recalculate joint relative feedback for continuous roation joints
-        if joint_index in continuous_joint_indices:
+        BUG: if the joint overshoots at 180 commanded relative position it might get stuck in the infinite 360 loop (keep rotating).
+        '''
 
-            # Commanded relative position is within (-180; 180]
-            if -1 * math.pi < current_abs_pos[joint_index] - start_abs_pos[joint_index] <= math.pi:
+        for joint_index in range(7):
+
+            # Recalculate joint relative feedback for continuous roation joints
+            if joint_index in continuous_joint_indices:
+
+                # Commanded relative position is within (-180; 180]
+                if -1 * math.pi < current_abs_pos[joint_index] - start_abs_pos[joint_index] <= math.pi:
+                    current_rel_pos[joint_index] = current_abs_pos[joint_index] - start_abs_pos[joint_index]
+                    
+                # Commanded relative position is crossing -180/180 border from the negative sign to the positive sign (Example -20: -170 to 170)
+                elif current_abs_pos[joint_index] - start_abs_pos[joint_index] > math.pi:
+                    current_rel_pos[joint_index] = current_abs_pos[joint_index] - start_abs_pos[joint_index] - 2 * math.pi
+
+                # Commanded relative position is crossing -180/180 border from the positive sign to the negative sign (Example +20: 170 to -170)
+                elif current_abs_pos[joint_index] - start_abs_pos[joint_index] <= -1 * math.pi:
+                    current_rel_pos[joint_index] = current_abs_pos[joint_index] - start_abs_pos[joint_index] + 2 * math.pi
+            
+            else:
                 current_rel_pos[joint_index] = current_abs_pos[joint_index] - start_abs_pos[joint_index]
-                
-            # Commanded relative position is crossing -180/180 border from the negative sign to the positive sign (Example -20: -170 to 170)
-            elif current_abs_pos[joint_index] - start_abs_pos[joint_index] > math.pi:
-                current_rel_pos[joint_index] = current_abs_pos[joint_index] - start_abs_pos[joint_index] - 2 * math.pi
 
-            # Commanded relative position is crossing -180/180 border from the positive sign to the negative sign (Example +20: 170 to -170)
-            elif current_abs_pos[joint_index] - start_abs_pos[joint_index] <= -1 * math.pi:
-                current_rel_pos[joint_index] = current_abs_pos[joint_index] - start_abs_pos[joint_index] + 2 * math.pi
-        
-        else:
-            current_rel_pos[joint_index] = current_abs_pos[joint_index] - start_abs_pos[joint_index]
-
-    # Publish relative feedback
-    state_1.publish(current_rel_pos[0])
-    state_2.publish(current_rel_pos[1])
-    state_3.publish(current_rel_pos[2])
-    state_4.publish(current_rel_pos[3])
-    state_5.publish(current_rel_pos[4])
-    state_6.publish(current_rel_pos[5])
-    state_7.publish(current_rel_pos[6])
+        # Publish relative feedback
+        state_1.publish(current_rel_pos[0])
+        state_2.publish(current_rel_pos[1])
+        state_3.publish(current_rel_pos[2])
+        state_4.publish(current_rel_pos[3])
+        state_5.publish(current_rel_pos[4])
+        state_6.publish(current_rel_pos[5])
+        state_7.publish(current_rel_pos[6])
  
     
 # Update joint velocities
 def control_effort_callback_1(data):
     global goal_vel
-    goal_vel[0] = data.data
+    global isInitialized
+
+    # Block callback function until all components are initialized
+    if isInitialized:
+        goal_vel[0] = data.data
 
 def control_effort_callback_2(data):
     global goal_vel
-    goal_vel[1] = data.data
+    global isInitialized
+
+    # Block callback function until all components are initialized
+    if isInitialized:
+        goal_vel[1] = data.data
 
 def control_effort_callback_3(data):
     global goal_vel
-    goal_vel[2] = data.data
+    global isInitialized
+
+    # Block callback function until all components are initialized
+    if isInitialized:
+        goal_vel[2] = data.data
 
 def control_effort_callback_4(data):
     global goal_vel
@@ -79,33 +96,39 @@ def control_effort_callback_4(data):
 
 def control_effort_callback_5(data):
     global goal_vel
-    goal_vel[4] = data.data
+    global isInitialized
+
+    # Block callback function until all components are initialized
+    if isInitialized:
+        goal_vel[4] = data.data
 
 def control_effort_callback_6(data):
     global goal_vel
-    goal_vel[5] = data.data
+    global isInitialized
+
+    # Block callback function until all components are initialized
+    if isInitialized:
+        goal_vel[5] = data.data
 
 def control_effort_callback_7(data):
     global goal_vel
-    goal_vel[6] = data.data
+    global isInitialized
+
+    # Block callback function until all components are initialized
+    if isInitialized:
+        goal_vel[6] = data.data
 
 
 # Calculates geodesic (shortest) angular distance and sets the goal positions relative to current positions
-def relative_setpoint_callback(data):
+def relative_setpoint(goal_positions):
     global goal_abs_pos, goal_rel_pos, current_abs_pos, start_abs_pos, continuous_joint_indices
 
     # Goal absolute coordinates input
-    goal_abs_pos[0] = data.joint_angles[0].value
-    goal_abs_pos[1] = data.joint_angles[1].value
-    goal_abs_pos[2] = data.joint_angles[2].value
-    goal_abs_pos[3] = data.joint_angles[3].value
-    goal_abs_pos[4] = data.joint_angles[4].value
-    goal_abs_pos[5] = data.joint_angles[5].value
-    goal_abs_pos[6] = data.joint_angles[6].value
+    goal_abs_pos = goal_positions
 
     # Set origin positions
     start_abs_pos = current_abs_pos
-    
+
     for joint_index in range(7):
 
         # Recalculate joint relative feedback for continuous roation joints 
@@ -125,9 +148,61 @@ def relative_setpoint_callback(data):
             goal_rel_pos[joint_index] = goal_abs_pos[joint_index] - current_abs_pos[joint_index]
 
 
+# RelaxedIK callback function
+def relative_setpoint_callback(data):
+    global isInitialized
+
+    # Block callback function until all components are initialized
+    if isInitialized:
+
+        # Form input array
+        goal_positions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
+
+        goal_positions[0] = data.joint_angles[0].value
+        goal_positions[1] = data.joint_angles[1].value
+        goal_positions[2] = data.joint_angles[2].value
+        goal_positions[3] = data.joint_angles[3].value
+        goal_positions[4] = data.joint_angles[4].value
+        goal_positions[5] = data.joint_angles[5].value
+        goal_positions[6] = data.joint_angles[6].value
+
+        # Calculate relative setpoint based on the input absolute goal positions
+        relative_setpoint(goal_positions)
+
+
+# Calculates geodesic (shortest) angular distance and sets the goal positions relative to current positions
+def pid_setpoint_handler(req):
+    global isInitialized
+
+    # Block callback function until all components are initialized
+    if isInitialized:
+
+        # Form input array
+        input = req.setpoint.split(" ")
+        goal_positions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
+
+        goal_positions[0] = float(input[0])
+        goal_positions[1] = float(input[1])
+        goal_positions[2] = float(input[2])
+        goal_positions[3] = float(input[3])
+        goal_positions[4] = float(input[4])
+        goal_positions[5] = float(input[5])
+        goal_positions[6] = float(input[6])
+
+        # Calculate relative setpoint based on the input absolute goal positions
+        relative_setpoint(goal_positions)
+
+        return True
+
+    return False
+
 if __name__ == '__main__':
     # Initialize the node
     rospy.init_node("pid_joints", anonymous=True)
+
+    # Flags
+    isInitialized = False
+    kinovaInitialized = False
 
     # Continous rotation joint indices
     continuous_joint_indices = (0, 2, 4, 6)
@@ -144,11 +219,7 @@ if __name__ == '__main__':
     current_abs_pos = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     # Abs joint positions at the moment of setting a new goal. Relative current joint positions are relative to these positions
-    #Subscribe to get current joint states
-    start_abs_pos = [] 
-    while not rospy.is_shutdown():  
-        rospy.Subscriber('/my_gen3/base_feedback/joint_state', JointState, init_pos_cb)
-        break
+    start_abs_pos = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
 
     # Publishing
     state_1 = rospy.Publisher('/joint_1/state', Float64, queue_size=1)
@@ -181,35 +252,53 @@ if __name__ == '__main__':
     rospy.Subscriber('/joint_7/control_effort', Float64, control_effort_callback_7)
 
     rospy.Subscriber('/relaxed_ik/joint_angle_solutions', JointAngles, relative_setpoint_callback)  # Global setpoint topic
-    rospy.Subscriber('/setpoint', String, relative_setpoint_callback)  # Single joint setpoint for debugging
+
+    # Services
+    setpoint_srv = rospy.Service('pid_setpoint', pid_setpoint, pid_setpoint_handler)
+
+    # Wait for kinova arm to send position feedback
+    print("\nWaiting for kinova position feedback...\n")
+
+    while not kinovaInitialized:
+        pass
+
+    print("\nFeedback is received!\n")
+
+    # Set isInitialized flag
+    isInitialized = True
+
+    print("\nPID is initialized!\n")
 
     # Main loop
     while not rospy.is_shutdown():
 
-        # Form a velocity message
-        velocity_message = Base_JointSpeeds()
+        # Wait for all components to be initialized
+        if isInitialized:
 
-        velocities_array = []
+            # Form a velocity message
+            velocity_message = Base_JointSpeeds()
 
-        # For each joint
-        for i in range(0, 7):
-            joint_velocity = JointSpeed()
-            joint_velocity.joint_identifier = i
-            joint_velocity.value = goal_vel[i]
-            joint_velocity.duration = 0   # Or 0.000333s
-            velocities_array.append(joint_velocity)
+            velocities_array = []
 
-        velocity_message.joint_speeds = velocities_array
-        velocity_message.duration = 0
+            # For each joint
+            for i in range(0, 7):
+                joint_velocity = JointSpeed()
+                joint_velocity.joint_identifier = i
+                joint_velocity.value = goal_vel[i]
+                joint_velocity.duration = 0   # Or 0.000333s
+                velocities_array.append(joint_velocity)
 
-        # Publish a velocity message
-        joint_velocity_pub.publish(velocity_message)
+            velocity_message.joint_speeds = velocities_array
+            velocity_message.duration = 0
 
-        # Publish new goals to PIDs
-        setpoint_1.publish(goal_rel_pos[0])
-        setpoint_2.publish(goal_rel_pos[1])
-        setpoint_3.publish(goal_rel_pos[2])
-        setpoint_4.publish(goal_rel_pos[3])
-        setpoint_5.publish(goal_rel_pos[4])
-        setpoint_6.publish(goal_rel_pos[5])
-        setpoint_7.publish(goal_rel_pos[6])
+            # Publish a velocity message
+            joint_velocity_pub.publish(velocity_message)
+
+            # Publish new goals to PIDs
+            setpoint_1.publish(goal_rel_pos[0])
+            setpoint_2.publish(goal_rel_pos[1])
+            setpoint_3.publish(goal_rel_pos[2])
+            setpoint_4.publish(goal_rel_pos[3])
+            setpoint_5.publish(goal_rel_pos[4])
+            setpoint_6.publish(goal_rel_pos[5])
+            setpoint_7.publish(goal_rel_pos[6])

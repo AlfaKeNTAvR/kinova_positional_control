@@ -9,6 +9,8 @@ from ROS_TCP_Endpoint_msgs.msg import ControllerInput
 from relaxed_ik_ros1.msg import EEPoseGoals
 import geometry_msgs.msg as geom_msgs
 from kortex_driver.msg import *
+from kinova_positional_control.srv import *
+from relaxed_ik_ros1.srv import activate_ik
 
 
 # Right controller topic callback function
@@ -21,7 +23,7 @@ def right_callback(data):
     # Transition from Left-handed CS (Unity) to Right-handed CS (Global): swap y and z axis
     # Then swap x and new y (which was z) to have x facing forward
     # Negate new y (which is x) to make it align with a global coordinate system
-    input_pos_gcs = np.array([data.controller_pos_z, -1 * data.controller_pos_x, data.controller_pos_y])
+    input_pos_gcs = np.array([-1 * data.controller_pos_z, data.controller_pos_x, data.controller_pos_y])
 
     # Transition from Global CS to Kinova CS: rotate around y and z axis
     origin, xaxis, yaxis, zaxis = (0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)
@@ -43,11 +45,11 @@ def right_callback(data):
     input_rot_gcs = T.quaternion_from_matrix(input_rot_gcs)
 
     # More comfortable position (compensation)
-    Qy = T.quaternion_about_axis(math.radians(35), yaxis)
+    Qy = T.quaternion_about_axis(math.radians(-45), yaxis)
     input_rot_gcs = T.quaternion_multiply(input_rot_gcs, Qy)
 
-    Qz = T.quaternion_about_axis(math.radians(15), zaxis)
-    input_rot_gcs = T.quaternion_multiply(input_rot_gcs, Qz)
+    # Qz = T.quaternion_about_axis(math.radians(15), zaxis)
+    # input_rot_gcs = T.quaternion_multiply(input_rot_gcs, Qz)
 
     # Transition from Global CS to Kinova CS: rotate around y and z axis
     input_rot_kcs = np.matmul(R_gcs_to_kcs, input_rot_gcs)
@@ -61,7 +63,6 @@ def right_callback(data):
 
             # Remove the flag
             onTrackingStart = False
-
 
         # Target position for relaxedIK: oculus input in KCS + differences
         target_pos_kcs = input_pos_kcs - oculus_kinova_diff + relaxedik_kinova_diff
@@ -78,10 +79,10 @@ def right_callback(data):
         pose_r.position.z = target_pos_kcs[2]
 
         # TODO: add orientation support
-        pose_r.orientation.x = input_rot_kcs[0]
-        pose_r.orientation.y = input_rot_kcs[1]
-        pose_r.orientation.z = input_rot_kcs[2]
-        pose_r.orientation.w = input_rot_kcs[3]
+        pose_r.orientation.x = 0
+        pose_r.orientation.y = 0
+        pose_r.orientation.z = 0
+        pose_r.orientation.w = 1
 
         # TODO: Form a message for relaxedIK (left arm)
         pose_l = geom_msgs.Pose()
@@ -125,50 +126,6 @@ def ee_position_callback(data):
     # ! ! ! Requires relaxedIK homing ! ! !
     if onStartup == True:
 
-        # # Homing position
-        # ja_init = JointAngles()
-
-        # init_joint_1 = JointAngle()
-        # init_joint_1.joint_identifier = 0
-        # init_joint_1.value = -0.06562561558173297
-        # ja_init.joint_angles.append(init_joint_1)
-
-        # init_joint_2 = JointAngle()
-        # init_joint_2.joint_identifier = 1
-        # init_joint_2.value = 1.8538876875092294
-        # ja_init.joint_angles.append(init_joint_2)
-
-        # init_joint_3 = JointAngle()
-        # init_joint_3.joint_identifier = 2
-        # init_joint_3.value = -3.1234911476605247
-        # ja_init.joint_angles.append(init_joint_3)
-
-        # init_joint_4 = JointAngle()
-        # init_joint_4.joint_identifier = 3
-        # init_joint_4.value = -0.5407607182949867
-        # ja_init.joint_angles.append(init_joint_4)
-
-        # init_joint_5 = JointAngle()
-        # init_joint_5.joint_identifier = 4
-        # init_joint_5.value = 1.6008414444228978
-        # ja_init.joint_angles.append(init_joint_5)
-
-        # init_joint_6 = JointAngle()
-        # init_joint_6.joint_identifier = 5
-        # init_joint_6.value = 1.5267517702646756
-        # ja_init.joint_angles.append(init_joint_6)
-
-        # init_joint_7 = JointAngle()
-        # init_joint_7.joint_identifier = 6
-        # init_joint_7.value = 1.5836379564132042
-        # ja_init.joint_angles.append(init_joint_7)
-
-        # angles_pub.publish(ja_init)
-
-        # print("Kinova is homing...")
-        # # rospy.sleep(30)
-        # print("Homed")
-
         # Calculate the difference after homing
         relaxedik_kinova_diff = np.array([0.0, 0.0, 0.0]) - ee_array
 
@@ -198,6 +155,7 @@ if __name__ == '__main__':
     relaxedik_kinova_diff = np.array([0.0, 0.0, 0.0])
 
     # Flags
+    onTrackingStart = True
     onStartup = True
 
     # Initialize the node
@@ -206,6 +164,30 @@ if __name__ == '__main__':
     # Publishing
     setpoint = rospy.Publisher('/relaxed_ik/ee_pose_goals', EEPoseGoals, queue_size=1)
     angles_pub = rospy.Publisher('/relaxed_ik/joint_angle_solutions', JointAngles, queue_size=10)
+
+    # Service
+    pid_setpoint_srv = rospy.ServiceProxy('pid_setpoint', pid_setpoint)
+    activate_ik_srv = rospy.ServiceProxy('relaxed_ik/activate_ik', activate_ik)
+
+    # Deactivate IK for homing
+    activate_ik_srv(False)
+
+    # Homing position
+    print("\nThe arm is homing...\n")
+    pid_setpoint_srv(str(math.radians(0.0)) + " " +
+                    str(math.radians(128.0)) + " " +
+                    str(math.radians(0.0)) + " " +
+                    str(math.radians(0.0)) + " " +
+                    str(math.radians(90.0)) + " " +
+                    str(math.radians(-90.0)) + " " +
+                    str(math.radians(90.0)) + " ")
+
+    rospy.sleep(5)
+
+    print("\nHomed!\n")
+
+    # Activate IK after homing
+    activate_ik_srv(True)
 
     # Subscribing
     # rospy.Subscriber("leftHandInfo", HandTracking, left_callback)
