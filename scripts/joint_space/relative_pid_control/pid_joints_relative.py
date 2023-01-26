@@ -56,13 +56,13 @@ def feedback_callback(data):
                 current_rel_pos[joint_index] = current_abs_pos[joint_index] - start_abs_pos[joint_index]
 
         # Publish relative feedback
-        state_1.publish(current_rel_pos[0])
-        state_2.publish(current_rel_pos[1])
-        state_3.publish(current_rel_pos[2])
-        state_4.publish(current_rel_pos[3])
-        state_5.publish(current_rel_pos[4])
-        state_6.publish(current_rel_pos[5])
-        state_7.publish(current_rel_pos[6])
+        state_1.publish(round(current_rel_pos[0], 4))
+        state_2.publish(round(current_rel_pos[1], 4))
+        state_3.publish(round(current_rel_pos[2], 4))
+        state_4.publish(round(current_rel_pos[3], 4))
+        state_5.publish(round(current_rel_pos[4], 4))
+        state_6.publish(round(current_rel_pos[5], 4))
+        state_7.publish(round(current_rel_pos[6], 4))
  
     
 # Update joint velocities
@@ -295,10 +295,10 @@ if __name__ == '__main__':
             joint_velocity_pub.publish(velocity_message)
 
             # Publish new goals to PIDs
-            setpoint_1.publish(goal_rel_pos[0])
-            setpoint_2.publish(goal_rel_pos[1])
-            setpoint_3.publish(goal_rel_pos[2])
-            setpoint_4.publish(goal_rel_pos[3])
-            setpoint_5.publish(goal_rel_pos[4])
-            setpoint_6.publish(goal_rel_pos[5])
-            setpoint_7.publish(goal_rel_pos[6])
+            setpoint_1.publish(round(goal_rel_pos[0], 4))
+            setpoint_2.publish(round(goal_rel_pos[1], 4))
+            setpoint_3.publish(round(goal_rel_pos[2], 4))
+            setpoint_4.publish(round(goal_rel_pos[3], 4))
+            setpoint_5.publish(round(goal_rel_pos[4], 4))
+            setpoint_6.publish(round(goal_rel_pos[5], 4))
+            setpoint_7.publish(round(goal_rel_pos[6], 4))
