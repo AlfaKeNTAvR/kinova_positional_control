@@ -9,6 +9,7 @@ from ROS_TCP_Endpoint_msgs.msg import ControllerInput
 from relaxed_ik_ros1.msg import EEPoseGoals
 import geometry_msgs.msg as geom_msgs
 from kortex_driver.msg import *
+from kortex_driver.srv import *
 from kinova_positional_control.srv import *
 from relaxed_ik_ros1.srv import activate_ik
 
@@ -58,6 +59,7 @@ def right_callback(data):
     global input_pos_kcs, input_rot_kcs 
     global oculus_kinova_diff_pos, oculus_kinova_diff_rot, relaxedik_kinova_diff_pos, relaxedik_kinova_diff_rot
     global onTrackingStart
+    global gripperButtonState, gripperButtonReleased
 
     # # POSITION
     # Transition from Left-handed CS (Unity) to Right-handed CS (Global): swap y and z axis
@@ -122,27 +124,21 @@ def right_callback(data):
 
         # TODO: stop any robot motion
 
-        pose_l.orientation.x = 0
-        pose_l.orientation.y = 0
-        pose_l.orientation.z = 0
-        pose_l.orientation.w = 1
+    if data.triggerButton:
+        gripperButtonState = True
+        
+        # Call gripper state machine
+        gripper_sm()
 
-        # Form full message for relaxedIK
-        ee_pose_goals = EEPoseGoals()
-        ee_pose_goals.ee_poses.append(pose_r)
-        ee_pose_goals.ee_poses.append(pose_l)
-        ee_pose_goals.header.seq = 0
+        gripperButtonReleased = False
 
-        # Publish a message with target position
-        setpoint.publish(ee_pose_goals)
-
-    # Stop tracking if gripButton was released
     else:
-        # Reset the flag
-        onTrackingStart = True
+        gripperButtonState = False
+        
+        # Call gripper state machine
+        gripper_sm()
 
-        # TODO: stop any robot motion
-
+        gripperButtonReleased = True
 
 # Callback function that subscribes to the end effector positions
 def ee_position_callback(data):
@@ -202,6 +198,49 @@ def calculate_controller_ee_diff():
     # print("Diff:", round(oculus_kinova_diff[0], 3), round(oculus_kinova_diff[1], 3), round(oculus_kinova_diff[2], 3))
     # print()
 
+ # Gripper control: mode=1 - force, mode=2 - velocity, mode=3 - position
+def gripper_control(mode, value):
+
+    # https://github.com/Kinovarobotics/ros_kortex/blob/noetic-devel/kortex_driver/msg/generated/base/Finger.msg
+    finger = Finger()
+    finger.finger_identifier = 0
+    finger.value = value
+
+    # https://github.com/Kinovarobotics/ros_kortex/blob/noetic-devel/kortex_driver/msg/generated/base/Gripper.msg
+    gripper = Gripper()
+    gripper.finger.append(finger)
+
+    # https://github.com/Kinovarobotics/ros_kortex/blob/noetic-devel/kortex_driver/msg/generated/base/GripperCommand.msg
+    gripper_command = SendGripperCommand()
+    gripper_command.mode = mode
+    gripper_command.duration = 0
+    gripper_command.gripper = gripper
+
+    gripper_command_srv(gripper_command)
+
+
+# Gripper control state machine
+def gripper_sm():
+    global gripperState
+    global gripperButtonState
+    global gripperButtonReleased
+
+    if gripperState == "open" and gripperButtonState and gripperButtonReleased:
+        print(1)
+        # Change gripper state
+        gripperState = "close"
+
+        # Close the gripper
+        gripper_control(3, 0.6)
+
+    elif gripperState == "close" and gripperButtonState and gripperButtonReleased:
+        print(2)
+        # Change gripper state
+        gripperState = "open"
+
+        # Open the gripper
+        gripper_control(3, 0.0)
+
 
 if __name__ == '__main__':
     # Variables
@@ -214,6 +253,10 @@ if __name__ == '__main__':
     # Flags
     onTrackingStart = True
     onStartup = True
+    
+    gripperState = "open"
+    gripperButtonState = False
+    gripperButtonReleased = True
 
     # Initialize the node
     rospy.init_node("coordinate_converter", anonymous=True)
@@ -225,6 +268,8 @@ if __name__ == '__main__':
     # Service
     pid_setpoint_srv = rospy.ServiceProxy('pid_setpoint', pid_setpoint)
     activate_ik_srv = rospy.ServiceProxy('relaxed_ik/activate_ik', activate_ik)
+    gripper_command_srv = rospy.ServiceProxy('my_gen3/base/send_gripper_command', SendGripperCommand)
+
 
     # Deactivate IK for homing
     activate_ik_srv(False)
