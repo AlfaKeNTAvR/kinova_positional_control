@@ -196,6 +196,28 @@ def pid_setpoint_handler(req):
 
     return False
 
+
+# Set a velocity limit in percentage (0.0 to 1.0)
+def pid_vel_limit_handler(req):
+    global vel_limit, max_vel, min_vel
+
+    # Block callback function until all components are initialized
+    if isInitialized:
+
+        if req.data > max_vel:
+            vel_limit = max_vel
+        
+        elif req.data < min_vel:
+            vel_limit = min_vel
+
+        else:
+            vel_limit = req.data
+
+        return True
+
+    return False
+
+
 if __name__ == '__main__':
     # Initialize the node
     rospy.init_node("pid_joints", anonymous=True)
@@ -220,6 +242,15 @@ if __name__ == '__main__':
 
     # Abs joint positions at the moment of setting a new goal. Relative current joint positions are relative to these positions
     start_abs_pos = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
+
+    # Other variables
+    max_vel = 1.0
+    min_vel = 0.1
+    vel_limit = 1.0
+    vel_smoothing = 1.0
+
+    # Joint velocity limits in radians
+    max_velocities = [1.396, 1.396, 1.396, 1.396, 1.222, 1.222, 1.222]
 
     # Publishing
     state_1 = rospy.Publisher('/joint_1/state', Float64, queue_size=1)
@@ -255,6 +286,7 @@ if __name__ == '__main__':
 
     # Services
     setpoint_srv = rospy.Service('pid_setpoint', pid_setpoint, pid_setpoint_handler)
+    vel_limit_srv = rospy.Service('pid_vel_limit', pid_vel_limit, pid_vel_limit_handler)
 
     # Wait for kinova arm to send position feedback
     print("\nWaiting for kinova position feedback...\n")
@@ -284,6 +316,19 @@ if __name__ == '__main__':
             for i in range(0, 7):
                 joint_velocity = JointSpeed()
                 joint_velocity.joint_identifier = i
+
+                # Limit output velocity
+                if abs(goal_vel[i]) > max_velocities[i] * vel_limit:
+
+                    if goal_vel[i] >= 0:
+                        goal_vel[i] = max_velocities[i] * vel_limit
+
+                    else:
+                        goal_vel[i] = -1 * max_velocities[i] * vel_limit
+
+                # Velocity smoothing
+                goal_vel[i] = goal_vel[i] * vel_smoothing
+
                 joint_velocity.value = goal_vel[i]
                 joint_velocity.duration = 0   # Or 0.000333s
                 velocities_array.append(joint_velocity)

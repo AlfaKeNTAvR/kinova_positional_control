@@ -267,12 +267,16 @@ if __name__ == '__main__':
 
     # Service
     pid_setpoint_srv = rospy.ServiceProxy('pid_setpoint', pid_setpoint)
+    vel_limit_srv = rospy.ServiceProxy('pid_vel_limit', pid_vel_limit)
     activate_ik_srv = rospy.ServiceProxy('relaxed_ik/activate_ik', activate_ik)
     gripper_command_srv = rospy.ServiceProxy('my_gen3/base/send_gripper_command', SendGripperCommand)
 
 
     # Deactivate IK for homing
     activate_ik_srv(False)
+
+    # Set 20% velocity
+    vel_limit_srv(0.2)
 
     # Homing position
     print("\nThe arm is homing...\n")
@@ -297,6 +301,9 @@ if __name__ == '__main__':
     rospy.sleep(3)
 
     print("RelaxedIK is initialized!\n") 
+
+    # Set 100% velocity
+    vel_limit_srv(1.0)
 
     # Subscribing
     # rospy.Subscriber("leftHandInfo", HandTracking, left_callback)

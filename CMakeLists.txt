@@ -59,6 +59,7 @@ find_package(catkin REQUIRED COMPONENTS
 add_service_files(
   FILES
   pid_setpoint.srv
+  pid_vel_limit.srv
 )
 
 ## Generate actions in the 'action' folder
