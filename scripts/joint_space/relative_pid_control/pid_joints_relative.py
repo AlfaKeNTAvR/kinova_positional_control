@@ -172,7 +172,7 @@ def relative_setpoint_callback(data):
 
 # Calculates geodesic (shortest) angular distance and sets the goal positions relative to current positions
 def pid_setpoint_handler(req):
-    global isInitialized
+    global isInitialized, motionFinished
 
     # Block callback function until all components are initialized
     if isInitialized:
@@ -218,6 +218,15 @@ def pid_vel_limit_handler(req):
     return False
 
 
+# Check if all joints have an absolute velocity value lower than a threshold and returns True
+def motion_finished(velocities):
+    for vel in velocities:
+        if abs(vel) > 0.01:
+            return False
+    
+    return True
+
+
 if __name__ == '__main__':
     # Initialize the node
     rospy.init_node("pid_joints", anonymous=True)
@@ -225,6 +234,7 @@ if __name__ == '__main__':
     # Flags
     isInitialized = False
     kinovaInitialized = False
+    motionFinished = True
 
     # Continous rotation joint indices
     continuous_joint_indices = (0, 2, 4, 6)
@@ -270,6 +280,8 @@ if __name__ == '__main__':
     setpoint_7 = rospy.Publisher('/joint_7/setpoint', Float64, queue_size=1)
 
     joint_velocity_pub = rospy.Publisher('/my_gen3/in/joint_velocity', Base_JointSpeeds, queue_size=1)
+
+    pid_motion_pub = rospy.Publisher('/pid/motion_finished', Bool, queue_size=1)
     
     # Subscribing
     rospy.Subscriber('/my_gen3/base_feedback/joint_state', JointState, feedback_callback)
@@ -347,3 +359,6 @@ if __name__ == '__main__':
             setpoint_5.publish(round(goal_rel_pos[4], 4))
             setpoint_6.publish(round(goal_rel_pos[5], 4))
             setpoint_7.publish(round(goal_rel_pos[6], 4))
+
+            # Check if all joint have finished their motion
+            pid_motion_pub.publish(motion_finished(goal_vel))

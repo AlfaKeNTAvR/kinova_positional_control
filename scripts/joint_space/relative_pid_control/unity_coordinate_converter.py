@@ -8,6 +8,7 @@ import math
 from ROS_TCP_Endpoint_msgs.msg import ControllerInput
 from relaxed_ik_ros1.msg import EEPoseGoals
 import geometry_msgs.msg as geom_msgs
+from std_msgs.msg import *
 from kortex_driver.msg import *
 from kortex_driver.srv import *
 from kinova_positional_control.srv import *
@@ -173,6 +174,25 @@ def ee_position_callback(data):
         print()  
 
 
+# Callback function that updates motionFinished flag
+def pid_motion_finished_callback(data):
+    global motionFinished
+
+    motionFinished = data.data
+
+
+# Block a code execution until a motionFinished flag is set or a node is shutdown
+def wait_motion_finished():
+    global motionFinished
+
+    # Allow a motion to start
+    rospy.sleep(1)
+
+    # Block the code execution
+    while motionFinished != True and not rospy.is_shutdown():
+        pass
+
+
 # Calculates the difference in position between the end effector and the controller
 def calculate_controller_ee_diff():
     global input_pos_kcs, input_rot_kcs, ee_array
@@ -258,12 +278,17 @@ if __name__ == '__main__':
     gripperButtonState = False
     gripperButtonReleased = True
 
+    motionFinished = False
+
     # Initialize the node
     rospy.init_node("coordinate_converter", anonymous=True)
 
     # Publishing
     setpoint = rospy.Publisher('/relaxed_ik/ee_pose_goals', EEPoseGoals, queue_size=1)
     angles_pub = rospy.Publisher('/relaxed_ik/joint_angle_solutions', JointAngles, queue_size=10)
+    
+    # Subscribing
+    rospy.Subscriber('/pid/motion_finished', Bool, pid_motion_finished_callback)
 
     # Service
     pid_setpoint_srv = rospy.ServiceProxy('pid_setpoint', pid_setpoint)
@@ -289,7 +314,8 @@ if __name__ == '__main__':
                     str(math.radians(-90.0)) + " " +
                     str(math.radians(90.0)) + " ")
 
-    rospy.sleep(5)
+    # Block until the motion is finished
+    wait_motion_finished()
 
     print("Homed!\n")
 
@@ -298,7 +324,8 @@ if __name__ == '__main__':
     # Activate IK after homing
     activate_ik_srv(True)
 
-    rospy.sleep(3)
+    # Block until the motion is finished
+    wait_motion_finished()
 
     print("RelaxedIK is initialized!\n") 
 
