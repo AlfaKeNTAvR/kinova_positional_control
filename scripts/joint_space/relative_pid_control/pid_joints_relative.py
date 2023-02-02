@@ -227,9 +227,18 @@ def motion_finished(velocities):
     return True
 
 
+# This function is called when the node is shutting down
+def node_shutdown():
+    print("\nNode is shutting down...")
+
+    # Stop arm movement
+    stop_arm_srv()
+
+
 if __name__ == '__main__':
     # Initialize the node
     rospy.init_node("pid_joints", anonymous=True)
+    rospy.on_shutdown(node_shutdown)
 
     # Flags
     isInitialized = False
@@ -299,6 +308,8 @@ if __name__ == '__main__':
     # Services
     setpoint_srv = rospy.Service('pid_setpoint', pid_setpoint, pid_setpoint_handler)
     vel_limit_srv = rospy.Service('pid_vel_limit', pid_vel_limit, pid_vel_limit_handler)
+
+    stop_arm_srv = rospy.ServiceProxy('my_gen3/base/stop', Stop)
 
     # Wait for kinova arm to send position feedback
     print("\nWaiting for kinova position feedback...\n")

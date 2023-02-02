@@ -46,12 +46,12 @@ def relaxed_ik_publish(target_position, target_orientation):
     ee_pose_goals.header.seq = 0
 
     # Publish a message with target position
-    print(target_orientation)
-    euler_print = T.euler_from_quaternion(target_orientation)
+    # print(target_orientation)
+    # euler_print = T.euler_from_quaternion(target_orientation)
 
-    print("Published rot:", round(math.degrees(euler_print[0]), 3), round(math.degrees(euler_print[1]), 3), round(math.degrees(euler_print[2]),3))
-    print()
-    setpoint.publish(ee_pose_goals)
+    # print("Published rot:", round(math.degrees(euler_print[0]), 3), round(math.degrees(euler_print[1]), 3), round(math.degrees(euler_print[2]),3))
+    # print()
+    setpoint_pub.publish(ee_pose_goals)
 
 
 # Right controller topic callback function
@@ -140,6 +140,7 @@ def right_callback(data):
         gripper_sm()
 
         gripperButtonReleased = True
+
 
 # Callback function that subscribes to the end effector positions
 def ee_position_callback(data):
@@ -246,7 +247,6 @@ def gripper_sm():
     global gripperButtonReleased
 
     if gripperState == "open" and gripperButtonState and gripperButtonReleased:
-        print(1)
         # Change gripper state
         gripperState = "close"
 
@@ -254,7 +254,6 @@ def gripper_sm():
         gripper_control(3, 0.6)
 
     elif gripperState == "close" and gripperButtonState and gripperButtonReleased:
-        print(2)
         # Change gripper state
         gripperState = "open"
 
@@ -262,7 +261,20 @@ def gripper_sm():
         gripper_control(3, 0.0)
 
 
+# This function is called when the node is shutting down
+def node_shutdown():
+    print("\nNode is shutting down...")
+
+    # Stop arm movement
+    stop_arm_srv()
+
+
 if __name__ == '__main__':
+    # Initialize the node
+    rospy.init_node("coordinate_converter", anonymous=True)
+    rospy.on_shutdown(node_shutdown)
+
+
     # Variables
     ee_array = np.array([0.0, 0.0, 0.0])
     oculus_kinova_diff_pos = np.array([0.0, 0.0, 0.0])
@@ -280,11 +292,8 @@ if __name__ == '__main__':
 
     motionFinished = False
 
-    # Initialize the node
-    rospy.init_node("coordinate_converter", anonymous=True)
-
     # Publishing
-    setpoint = rospy.Publisher('/relaxed_ik/ee_pose_goals', EEPoseGoals, queue_size=1)
+    setpoint_pub = rospy.Publisher('/relaxed_ik/ee_pose_goals', EEPoseGoals, queue_size=1)
     angles_pub = rospy.Publisher('/relaxed_ik/joint_angle_solutions', JointAngles, queue_size=10)
     
     # Subscribing
@@ -292,16 +301,19 @@ if __name__ == '__main__':
 
     # Service
     pid_setpoint_srv = rospy.ServiceProxy('pid_setpoint', pid_setpoint)
-    vel_limit_srv = rospy.ServiceProxy('pid_vel_limit', pid_vel_limit)
+    pid_vel_limit_srv = rospy.ServiceProxy('pid_vel_limit', pid_vel_limit)
+
     activate_ik_srv = rospy.ServiceProxy('relaxed_ik/activate_ik', activate_ik)
+
     gripper_command_srv = rospy.ServiceProxy('my_gen3/base/send_gripper_command', SendGripperCommand)
+    stop_arm_srv = rospy.ServiceProxy('my_gen3/base/stop', Stop)
 
 
     # Deactivate IK for homing
     activate_ik_srv(False)
 
     # Set 20% velocity
-    vel_limit_srv(0.2)
+    pid_vel_limit_srv(0.2)
 
     # Homing position
     print("\nThe arm is homing...\n")
@@ -330,7 +342,7 @@ if __name__ == '__main__':
     print("RelaxedIK is initialized!\n") 
 
     # Set 100% velocity
-    vel_limit_srv(1.0)
+    pid_vel_limit_srv(1.0)
 
     # Subscribing
     # rospy.Subscriber("leftHandInfo", HandTracking, left_callback)
