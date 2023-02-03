@@ -13,6 +13,8 @@ from kortex_driver.msg import *
 from kortex_driver.srv import *
 from kinova_positional_control.srv import *
 from relaxed_ik_ros1.srv import activate_ik
+from gopher_ros_clearcore.msg import *
+from gopher_ros_clearcore.srv import *
 
 
 def relaxed_ik_publish(target_position, target_orientation):
@@ -140,6 +142,11 @@ def right_callback(data):
         gripper_sm()
 
         gripperButtonReleased = True
+
+    # Chest joystick control
+    msg = geom_msgs.Twist()
+    msg.linear.z = np.interp(round(data.joystick_pos_y, 2), [-1.0, 1.0],[-0.5, 0.5])
+    chest_vel_pub.publish(msg)
 
 
 # Callback function that subscribes to the end effector positions
@@ -295,6 +302,7 @@ if __name__ == '__main__':
     # Publishing
     setpoint_pub = rospy.Publisher('/relaxed_ik/ee_pose_goals', EEPoseGoals, queue_size=1)
     angles_pub = rospy.Publisher('/relaxed_ik/joint_angle_solutions', JointAngles, queue_size=10)
+    chest_vel_pub = rospy.Publisher('z_chest_vel', geom_msgs.Twist, queue_size=1)
     
     # Subscribing
     rospy.Subscriber('/pid/motion_finished', Bool, pid_motion_finished_callback)
@@ -308,6 +316,9 @@ if __name__ == '__main__':
     gripper_command_srv = rospy.ServiceProxy('my_gen3/base/send_gripper_command', SendGripperCommand)
     stop_arm_srv = rospy.ServiceProxy('my_gen3/base/stop', Stop)
 
+    homing_srv = rospy.ServiceProxy('z_chest_home', Homing)
+
+    homing_srv(True)
 
     # Deactivate IK for homing
     activate_ik_srv(False)
@@ -345,7 +356,6 @@ if __name__ == '__main__':
     pid_vel_limit_srv(1.0)
 
     # Subscribing
-    # rospy.Subscriber("leftHandInfo", HandTracking, left_callback)
     rospy.Subscriber("rightControllerInfo", ControllerInput, right_callback)
     rospy.Subscriber('/my_gen3/base_feedback', BaseCyclic_Feedback, ee_position_callback)
 
