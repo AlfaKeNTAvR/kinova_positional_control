@@ -7,7 +7,7 @@ from std_msgs.msg import *
 from kortex_driver.srv import *
 from kortex_driver.msg import *
 from sensor_msgs.msg import JointState
-from kinova_positional_control.srv import *
+import kinova_positional_control.srv as posctrl_srv
 
 
 # Get current relative joint positions
@@ -306,8 +306,8 @@ if __name__ == '__main__':
     rospy.Subscriber('/relaxed_ik/joint_angle_solutions', JointAngles, relative_setpoint_callback)  # Global setpoint topic
 
     # Services
-    setpoint_srv = rospy.Service('pid_setpoint', pid_setpoint, pid_setpoint_handler)
-    vel_limit_srv = rospy.Service('pid_vel_limit', pid_vel_limit, pid_vel_limit_handler)
+    setpoint_srv = rospy.Service('pid_setpoint', posctrl_srv.pid_setpoint, pid_setpoint_handler)
+    vel_limit_srv = rospy.Service('pid_vel_limit', posctrl_srv.pid_vel_limit, pid_vel_limit_handler)
 
     stop_arm_srv = rospy.ServiceProxy('my_gen3/base/stop', Stop)
 

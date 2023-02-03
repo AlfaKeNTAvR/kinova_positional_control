@@ -11,10 +11,10 @@ import geometry_msgs.msg as geom_msgs
 from std_msgs.msg import *
 from kortex_driver.msg import *
 from kortex_driver.srv import *
-from kinova_positional_control.srv import *
+import kinova_positional_control.srv as posctrl_srv
 from relaxed_ik_ros1.srv import activate_ik
-from gopher_ros_clearcore.msg import *
-from gopher_ros_clearcore.srv import *
+import gopher_ros_clearcore.msg as clearcore_msg
+import gopher_ros_clearcore.srv as clearcore_srv
 
 
 def relaxed_ik_publish(target_position, target_orientation):
@@ -308,15 +308,15 @@ if __name__ == '__main__':
     rospy.Subscriber('/pid/motion_finished', Bool, pid_motion_finished_callback)
 
     # Service
-    pid_setpoint_srv = rospy.ServiceProxy('pid_setpoint', pid_setpoint)
-    pid_vel_limit_srv = rospy.ServiceProxy('pid_vel_limit', pid_vel_limit)
+    pid_setpoint_srv = rospy.ServiceProxy('pid_setpoint', posctrl_srv.pid_setpoint)
+    pid_vel_limit_srv = rospy.ServiceProxy('pid_vel_limit', posctrl_srv.pid_vel_limit)
 
     activate_ik_srv = rospy.ServiceProxy('relaxed_ik/activate_ik', activate_ik)
 
     gripper_command_srv = rospy.ServiceProxy('my_gen3/base/send_gripper_command', SendGripperCommand)
     stop_arm_srv = rospy.ServiceProxy('my_gen3/base/stop', Stop)
 
-    homing_srv = rospy.ServiceProxy('z_chest_home', Homing)
+    homing_srv = rospy.ServiceProxy('z_chest_home', clearcore_srv.Homing)
 
     homing_srv(True)
 
