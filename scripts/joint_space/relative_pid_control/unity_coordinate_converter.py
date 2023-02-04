@@ -59,10 +59,11 @@ def relaxed_ik_publish(target_position, target_orientation):
 # Right controller topic callback function
 # Callback function that subscribes to the xyz left controller positions
 def right_callback(data):
-    global input_pos_kcs, input_rot_kcs 
+    global input_pos_kcs, input_rot_kcs
     global oculus_kinova_diff_pos, oculus_kinova_diff_rot, relaxedik_kinova_diff_pos, relaxedik_kinova_diff_rot
     global onTrackingStart
     global gripperButtonState, gripperButtonReleased
+    global chest_vel
 
     # # POSITION
     # Transition from Left-handed CS (Unity) to Right-handed CS (Global): swap y and z axis
@@ -144,8 +145,15 @@ def right_callback(data):
         gripperButtonReleased = True
 
     # Chest joystick control
+    if abs(data.joystick_pos_y) > 0.05:
+        chest_vel = np.interp(round(data.joystick_pos_y, 4), [-1.0, 1.0],[-0.8, 0.8])
+
+    else:
+        chest_vel = 0.0
+    
+    # Publish chest velocity
     msg = geom_msgs.Twist()
-    msg.linear.z = np.interp(round(data.joystick_pos_y, 2), [-1.0, 1.0],[-0.5, 0.5])
+    msg.linear.z = chest_vel
     chest_vel_pub.publish(msg)
 
 
@@ -163,7 +171,6 @@ def ee_position_callback(data):
                         math.radians(data.base.tool_pose_theta_z)])
 
     # Calculate a transition from relaxedIK initial absolute postion (0, 0, 0) to KinovaFK on startup
-    # ! ! ! Requires relaxedIK homing ! ! !
     if onStartup == True:
 
         # Calculate the difference after homing
@@ -177,9 +184,9 @@ def ee_position_callback(data):
         # print("Diff (pos):", relaxedik_kinova_diff_pos)
         # print()  
 
-        print("EE (rot):", ee_array[3:6].round(3))
-        print("Diff (rot):", relaxedik_kinova_diff_rot.round(3))
-        print()  
+        # print("EE (rot):", ee_array[3:6].round(3))
+        # print("Diff (rot):", relaxedik_kinova_diff_rot.round(3))
+        # print()  
 
 
 # Callback function that updates motionFinished flag
@@ -216,15 +223,11 @@ def calculate_controller_ee_diff():
     # oculus_kinova_diff_rot[1] =  input_rot_kcs_euler[1] - ee_array[4]
     # oculus_kinova_diff_rot[2] =  input_rot_kcs_euler[2] - ee_array[5]
 
-    print("Input (pos):", input_pos_kcs)
-    print("EE (pos):", ee_array[3:6])
-    print("Diff (pos):", oculus_kinova_diff_pos)
-    print()  
+    # print("Input (pos):", input_pos_kcs)
+    # print("EE (pos):", ee_array[3:6])
+    # print("Diff (pos):", oculus_kinova_diff_pos)
+    # print()  
 
-    # print("Raw Input:", round(input_pos_kcs[0], 3), round(input_pos_kcs[1], 3), round(input_pos_kcs[2], 3))
-    # print("EE:", round(ee_array[0], 3), round(ee_array[1], 3), round(ee_array[2], 3))
-    # print("Diff:", round(oculus_kinova_diff[0], 3), round(oculus_kinova_diff[1], 3), round(oculus_kinova_diff[2], 3))
-    # print()
 
  # Gripper control: mode=1 - force, mode=2 - velocity, mode=3 - position
 def gripper_control(mode, value):
@@ -272,8 +275,11 @@ def gripper_sm():
 def node_shutdown():
     print("\nNode is shutting down...")
 
-    # Stop arm movement
+    # Stop arm motion
     stop_arm_srv()
+
+    # Stop chest motion
+    chest_stop_srv()
 
 
 if __name__ == '__main__':
@@ -288,6 +294,8 @@ if __name__ == '__main__':
     oculus_kinova_diff_rot = np.array([0.0, 0.0, 0.0])
     relaxedik_kinova_diff_pos = np.array([0.0, 0.0, 0.0])
     relaxedik_kinova_diff_rot = np.array([0.0, 0.0, 0.0])
+
+    chest_vel = 0.0
 
     # Flags
     onTrackingStart = True
@@ -316,9 +324,11 @@ if __name__ == '__main__':
     gripper_command_srv = rospy.ServiceProxy('my_gen3/base/send_gripper_command', SendGripperCommand)
     stop_arm_srv = rospy.ServiceProxy('my_gen3/base/stop', Stop)
 
-    homing_srv = rospy.ServiceProxy('z_chest_home', clearcore_srv.Homing)
+    chest_homing_srv = rospy.ServiceProxy('z_chest_home', clearcore_srv.Homing)
+    chest_stop_srv = rospy.ServiceProxy('z_chest_stop', clearcore_srv.Stop)
 
-    homing_srv(True)
+    # Home the chest
+    chest_homing_srv(True)
 
     # Deactivate IK for homing
     activate_ik_srv(False)
