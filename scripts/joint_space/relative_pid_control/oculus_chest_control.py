@@ -46,7 +46,7 @@ def calibrate_arm_boundaries_sm():
     global calibrate_arm_boundaries_state
 
     # To reduce arm stretching
-    boundary_offset = 0.15
+    boundary_offset = 0.2
 
     # Start calibration
     if calibrate_arm_boundaries_state == 0:
@@ -203,11 +203,11 @@ def kinova_mapping():
             # Map (scale) controller position within user arm motion range onto Kinova motion range
             scaled_z = np.interp(input_pos_gcs[2], 
                                 [operator_arm_boundary['min'], operator_arm_boundary['max']], 
-                                [0.00, 1.40])
+                                [relaxed_ik_boundary['z_min'], relaxed_ik_boundary['z_max']])
 
 
-            # Safety feature: only start tracking if controller mapped Z coordinate is within 0.05 m of Kinova current Z coordinate (because of absolute coordinates)
-            if onTrackingStart['right_arm'] == True and abs(relaxed_ik_pos_gcs[2] - scaled_z) < 0.05:
+            # Safety feature: only start tracking if controller mapped Z coordinate is within 0.01 m of Kinova current Z coordinate (because of absolute coordinates)
+            if onTrackingStart['right_arm'] == True and abs(relaxed_ik_pos_gcs[2] - scaled_z) < 0.01:
                 calculate_controller_ee_diff()        
 
                 # Remove the flag
@@ -284,9 +284,43 @@ def relaxed_ik_pub_commanded_wcs(current_position_wcs, current_orientation_wcs):
 def relaxed_ik_pub_target_gcs(target_position_gcs, target_orientation_gcs):
     global R_gcs_to_kcs, R_kcs_to_gcs
     global relaxed_ik_pos_gcs, chest_pos
+    global relaxed_ik_boundary
 
     # Update relaxed_ik global variable
     relaxed_ik_pos_gcs = target_position_gcs.copy()
+
+
+    # Apply limits
+    if relaxed_ik_pos_gcs[0] < relaxed_ik_boundary['x_min']:
+        relaxed_ik_pos_gcs[0] = relaxed_ik_boundary['x_min']
+
+        calculate_controller_ee_diff()
+
+    elif relaxed_ik_pos_gcs[0] > relaxed_ik_boundary['x_max']:
+        relaxed_ik_pos_gcs[0] = relaxed_ik_boundary['x_max']
+
+        calculate_controller_ee_diff()
+
+    if relaxed_ik_pos_gcs[1] < relaxed_ik_boundary['y_min']:
+        relaxed_ik_pos_gcs[1] = relaxed_ik_boundary['y_min']
+
+        calculate_controller_ee_diff()
+
+    elif relaxed_ik_pos_gcs[1] > relaxed_ik_boundary['y_max']:
+        relaxed_ik_pos_gcs[1] = relaxed_ik_boundary['y_max']
+
+        calculate_controller_ee_diff()
+
+    if relaxed_ik_pos_gcs[2] < relaxed_ik_boundary['z_min']:
+        relaxed_ik_pos_gcs[2] = relaxed_ik_boundary['z_min']
+
+        calculate_controller_ee_diff()
+
+    elif relaxed_ik_pos_gcs[2] > relaxed_ik_boundary['z_max']:
+        relaxed_ik_pos_gcs[2] = relaxed_ik_boundary['z_max']
+
+        calculate_controller_ee_diff()
+
 
     # Recalculate into relaxed IK CS
     relaxed_ik_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], target_position_gcs)
@@ -494,6 +528,8 @@ if __name__ == '__main__':
 
     operator_arm_boundary = {'min': 1.03, 'max': 1.73}
     calibrate_arm_boundaries_state = 0
+
+    relaxed_ik_boundary = {"x_min": -0.3, "x_max": 0.3, "y_min": -0.4, "y_max": 1.0, "z_min": 0.0, "z_max": 1.3}
 
     # Chest
     chest_vel = 0.0
