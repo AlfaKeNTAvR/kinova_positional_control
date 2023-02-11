@@ -499,6 +499,8 @@ def node_shutdown():
     # Stop chest motion
     chest_stop_srv()
 
+    # Deactivate chest feedback
+    chest_logger_srv(False)
 
 if __name__ == '__main__':
     # Initialize the node
@@ -572,6 +574,7 @@ if __name__ == '__main__':
     chest_homing_srv = rospy.ServiceProxy('z_chest_home', clearcore_srv.Homing)
     chest_stop_srv = rospy.ServiceProxy('z_chest_stop', clearcore_srv.Stop)
     chest_abspos_srv = rospy.ServiceProxy('z_chest_abspos', clearcore_srv.AbsolutePosition)
+    chest_logger_srv = rospy.ServiceProxy('z_chest_logger', clearcore_srv.LoggerControl)
 
     # Home the chest
     chest_homing_srv(True)
@@ -621,6 +624,9 @@ if __name__ == '__main__':
 
     # Set 100% velocity
     pid_vel_limit_srv(1.0)
+
+    # Activate chest feedback
+    chest_logger_srv(True)
 
     # Set the flag and finish initialization
     isInitialized = True
