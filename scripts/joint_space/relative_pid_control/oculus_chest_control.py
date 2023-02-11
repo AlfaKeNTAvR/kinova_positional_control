@@ -195,9 +195,7 @@ def kinova_mapping():
             # Compesantion for controller and GCS misalignment
             relaxed_ik_pos_gcs = input_pos_gcs - oculus_kinova_pos_diff_gcs
 
-            # Transition from Global CS to Relaxed IK CS: rotate around y and z axis
-            relaxed_ik_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], relaxed_ik_pos_gcs)   
-            relaxed_ik_publish_rikcs(relaxed_ik_pos_rikcs, [1, 0, 0, 0])
+            relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
 
 
         # Chest scaled motion mapping
@@ -223,10 +221,8 @@ def kinova_mapping():
 
                 # Update Z with new scaled Z
                 relaxed_ik_pos_gcs[2] = scaled_z
-                
-                # Transition from Global CS to Relaxed IK CS: rotate around y and z axis
-                relaxed_ik_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], relaxed_ik_pos_gcs)   
-                relaxed_ik_publish_rikcs(relaxed_ik_pos_rikcs, [1, 0, 0, 0])
+
+                relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
 
 
     # Stop tracking if gripButton was released
@@ -254,8 +250,59 @@ def kinova_mapping():
         gripperButtonReleased = True
 
 
+# Publish target position and orientation in World Coordinate system (same as Global CS, but Z contains a chest height)
+def relaxed_ik_pub_target_wcs(target_position_wcs, target_orientation_wcs):
+    global R_gcs_to_kcs, R_kcs_to_gcs
+    global relaxed_ik_pos_gcs, chest_pos
+
+    # Update relaxed_ik global variable
+    relaxed_ik_pos_gcs = target_position_wcs.copy()
+    relaxed_ik_pos_gcs[2] = target_position_wcs[2] - chest_pos / 1000
+
+    # Recalculate into relaxed IK CS
+    relaxed_ik_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], target_position_wcs)
+
+    # TODO: orientation
+    relaxed_ik_pub_target_rikcs(relaxed_ik_pos_rikcs, target_orientation_wcs)
+
+    # Publish commanded relaxed_ik in world coordinates
+    relaxed_ik_pub_commanded_wcs(target_position_wcs, target_orientation_wcs)
+
+
+# Publish last commanded target position and orientation in a World Coordinate System
+def relaxed_ik_pub_commanded_wcs(current_position_wcs, current_orientation_wcs):
+
+    # Combine into a single array
+    msg = Float32MultiArray()
+    msg.data = current_position_wcs.tolist() + current_orientation_wcs
+
+    # Publish
+    relaxed_ik_target_wcs_pub.publish(msg)
+
+
+# Publish target position and orientation in Global Coordinate system (parallel to the ground: X - forw, Y - left, Z - up)
+def relaxed_ik_pub_target_gcs(target_position_gcs, target_orientation_gcs):
+    global R_gcs_to_kcs, R_kcs_to_gcs
+    global relaxed_ik_pos_gcs, chest_pos
+
+    # Update relaxed_ik global variable
+    relaxed_ik_pos_gcs = target_position_gcs.copy()
+
+    # Recalculate into relaxed IK CS
+    relaxed_ik_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], target_position_gcs)
+
+    # TODO: orientation
+    relaxed_ik_pub_target_rikcs(relaxed_ik_pos_rikcs, target_orientation_gcs)
+
+    # Add chest height to Z for WCS
+    relaxed_ik_pos_wcs = target_position_gcs.copy()
+    relaxed_ik_pos_wcs[2] = relaxed_ik_pos_wcs[2] + chest_pos / 1000
+
+    relaxed_ik_pub_commanded_wcs(relaxed_ik_pos_wcs, target_orientation_gcs)
+
+
 # Publish target position and orientation in relaxed IK Coordinate system (Kinova)
-def relaxed_ik_publish_rikcs(target_position, target_orientation):
+def relaxed_ik_pub_target_rikcs(target_position, target_orientation):
 
     # Form a message for relaxedIK (right arm)
     pose_r = geom_msgs.Pose()
@@ -289,25 +336,10 @@ def relaxed_ik_publish_rikcs(target_position, target_orientation):
     setpoint_pub.publish(ee_pose_goals)
 
 
-# Publish target position and orientation in global Coordinate system (parallel to the ground: X - forw, Y - left, Z - up)
-def relaxed_ik_publish_gcs(target_position, target_orientation):
-    global R_gcs_to_kcs, R_kcs_to_gcs
-    global relaxed_ik_pos_gcs
-
-    # Update the global variable
-    relaxed_ik_pos_gcs = target_position
-
-    # Recalculate into relaxed IK Coordinate system
-    relaxed_ik_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], target_position)
-
-    # TODO: orientation
-    relaxed_ik_publish_rikcs(relaxed_ik_pos_rikcs, target_orientation)
-
-
 # Right controller topic callback function
 def right_callback(data):
     global right_controller
-    
+
     # Update dictionary
     right_controller['primaryButton'] = data.primaryButton
     right_controller['secondaryButton'] = data.secondaryButton
@@ -482,6 +514,7 @@ if __name__ == '__main__':
     # Publishing
     setpoint_pub = rospy.Publisher('/relaxed_ik/ee_pose_goals', EEPoseGoals, queue_size=1)
     angles_pub = rospy.Publisher('/relaxed_ik/joint_angle_solutions', JointAngles, queue_size=10)
+    relaxed_ik_target_wcs_pub = rospy.Publisher('/relaxed_ik/position_wcs', Float32MultiArray, queue_size=1)
     chest_vel_pub = rospy.Publisher('z_chest_vel', geom_msgs.Twist, queue_size=1)
     chest_abspos_pub = rospy.Publisher('/z_chest_pos', clearcore_msg.Position, queue_size=1)
     
@@ -517,7 +550,7 @@ if __name__ == '__main__':
     rospy.sleep(1)
 
     # Home using relaxedIK
-    relaxed_ik_publish_rikcs([0, 0, 0], [1, 0, 0, 0])
+    relaxed_ik_pub_target_rikcs([0, 0, 0], [1, 0, 0, 0])
 
     # Block until the motion is finished
     wait_motion_finished()
@@ -545,7 +578,7 @@ if __name__ == '__main__':
         chest_abspos_srv(220, 1.0)
 
         # Move Kinova to the middle position
-        relaxed_ik_publish_gcs([0, -0.1, 0.5], [1, 0, 0, 0])
+        relaxed_ik_pub_target_gcs(np.array([0, -0.1, 0.5]), [1, 0, 0, 0])
 
         # Block until the motion is finished
         wait_motion_finished()
