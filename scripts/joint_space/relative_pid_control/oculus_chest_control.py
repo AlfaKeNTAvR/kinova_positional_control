@@ -260,7 +260,7 @@ def relaxed_ik_pub_target_wcs(target_position_wcs, target_orientation_wcs):
     relaxed_ik_pos_gcs[2] = target_position_wcs[2] - chest_pos / 1000
 
     # Recalculate into relaxed IK CS
-    relaxed_ik_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], target_position_wcs)
+    relaxed_ik_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], relaxed_ik_pos_gcs)
 
     # TODO: orientation
     relaxed_ik_pub_target_rikcs(relaxed_ik_pos_rikcs, target_orientation_wcs)
@@ -501,6 +501,32 @@ def node_shutdown():
 
     # Deactivate chest feedback
     chest_logger_srv(False)
+
+
+# Samples and executes trajectory based on the target goal in WCS and duration
+def trajectory_sampler(target_pos_wcs, duration):
+    global relaxed_ik_pos_gcs, chest_pos
+
+    # Sampling and executing frequency
+    loop_frequency = 100
+
+    # Convert a current position from GCS to WCS
+    relaxed_ik_pos_wcs = relaxed_ik_pos_gcs.copy()
+    relaxed_ik_pos_wcs[2] = relaxed_ik_pos_wcs[2] + chest_pos / 1000  
+
+    num_samples = int(loop_frequency * duration)
+    t = np.linspace(0, duration, num_samples)
+    samples = np.zeros((num_samples, 3))
+
+    # NOTE: Blocking code
+    for i in range(num_samples):
+        # Generate a sample
+        samples[i, :] = relaxed_ik_pos_wcs + (target_pos_wcs - relaxed_ik_pos_wcs) * (1 - np.cos(np.pi * t[i] / duration)) / 2
+
+        relaxed_ik_pub_target_wcs(samples[i], [1, 0, 0, 0])
+
+        rospy.Rate(loop_frequency).sleep()
+
 
 if __name__ == '__main__':
     # Initialize the node
