@@ -132,8 +132,11 @@ def chest_mapping():
 
                 # Safety feature: only start tracking if controller mapped Z coordinate is within 10 mm of chest current Z coordinate (because of absolute coordinates)
                 if onTrackingStart['chest'] == True and abs(chest_pos - scaled_chest_pos) < 10:
-                    # Reset the flag
-                    onTrackingStart['chest'] = False
+                    calculate_controller_ee_diff()        
+
+                    # Remove the flag
+                    onTrackingStart['right_arm'] = False
+                    onTrackingStart['chest'] = False 
 
                 # Tracking has started
                 elif onTrackingStart['chest'] == False:
@@ -208,16 +211,9 @@ def kinova_mapping():
                                 [operator_arm_boundary['min'], operator_arm_boundary['max']], 
                                 [relaxed_ik_boundary['z_min'], relaxed_ik_boundary['z_max']])
 
-
-            # Safety feature: only start tracking if controller mapped Z coordinate is within 0.01 m of Kinova current Z coordinate (because of absolute coordinates)
-            if onTrackingStart['right_arm'] == True and abs(relaxed_ik_pos_gcs[2] - scaled_z) < 0.01:
-                calculate_controller_ee_diff()        
-
-                # Remove the flag
-                onTrackingStart['right_arm'] = False 
-
+            # Safety feature: only start tracking if chest tracking has started
             # Tracking has started
-            elif onTrackingStart['right_arm'] == False:
+            if onTrackingStart['right_arm'] == False:
 
                 # Compesantion for controller and GCS misalignment
                 relaxed_ik_pos_gcs[0:2] = input_pos_gcs[0:2] - oculus_kinova_pos_diff_gcs[0:2]
