@@ -250,6 +250,10 @@ def kinova_mapping():
         gripperButtonReleased = True
 
 
+    # Call pick and place autonomy state machine
+    pick_place_autonomy_sm()
+
+
 # Publish target position and orientation in World Coordinate system (same as Global CS, but Z contains a chest height)
 def relaxed_ik_pub_target_wcs(target_position_wcs, target_orientation_wcs):
     global R_gcs_to_kcs, R_kcs_to_gcs
@@ -528,6 +532,132 @@ def trajectory_sampler(target_pos_wcs, duration):
         rospy.Rate(loop_frequency).sleep()
 
 
+def generate_grid(rows, columns, top_right_x, top_right_y, row_distances, column_distances):
+    # Generate x coordinates
+    x_coordinates = np.linspace(top_right_x, top_right_x + sum(column_distances), columns)[::-1]
+
+    # Generate y coordinates
+    y_coordinates = list()
+    y_coordinates.append(top_right_y)
+    
+    for i in range(1, rows):
+        y_coordinates.append(y_coordinates[i-1] - row_distances[i-1])
+
+    y_coordinates = np.array(y_coordinates)
+
+    # Generate a grid of x and y coordinates using numpy's meshgrid function
+    x_coordinates, y_coordinates = np.meshgrid(x_coordinates, y_coordinates)
+
+    # Combine the x and y coordinates into a single grid
+    grid = np.stack((x_coordinates, y_coordinates), axis=-1)
+
+    return grid
+
+
+def find_closest_point(x, y, grid):
+    # Calculate the Euclidean distance between each point in the grid and the input x, y coordinates
+    distances = np.sqrt((grid[..., 0] - x)**2 + (grid[..., 1] - y)**2)
+    
+    # Find the index of the point with the minimum distance
+    row, col = np.unravel_index(np.argmin(distances), distances.shape)
+    
+    return row, col
+
+
+def pick_place_autonomy_sm():
+    global pp_sm_state, gripperState, right_controller, relaxed_ik_boundary
+    global shelf_grid, chest_pos, relaxed_ik_pos_gcs
+
+    z_reach_bound = 0.2
+    x_grasp = 0.53
+
+
+    if pp_sm_state == "manual" and right_controller['primaryButton'] == True:
+
+        pp_sm_state = "intent"
+
+
+    elif pp_sm_state == "intent" and right_controller['primaryButton'] == False:  
+
+        y = relaxed_ik_pos_gcs[1]
+        z = relaxed_ik_pos_gcs[2] + chest_pos / 1000
+
+
+        row, col = find_closest_point(y, z, shelf_grid)
+
+        if gripperState == "open":
+            # Reachable goal
+            if abs(relaxed_ik_pos_gcs[2] - relaxed_ik_boundary['z_max']) > z_reach_bound and abs(relaxed_ik_pos_gcs[2] - relaxed_ik_boundary['z_min']) > z_reach_bound:
+                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1]]), 1)   
+                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'] + 0.05, shelf_grid[row, col][0], shelf_grid[row, col][1]]), 0.5)  
+                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1]]), 0.5)
+
+                pp_sm_state = "confirm" 
+
+            # Unreachable goal
+            else:
+                
+                pp_sm_state = "manual"        
+            
+
+        elif gripperState == "close":
+            # Reachable goal
+            if abs(relaxed_ik_pos_gcs[2] - relaxed_ik_boundary['z_max']) > z_reach_bound and abs(relaxed_ik_pos_gcs[2] - relaxed_ik_boundary['z_min']) > z_reach_bound:
+                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.03]), 1)  
+                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'] + 0.05, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.03]), 0.5) 
+                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.03]), 0.5) 
+
+                pp_sm_state = "confirm"
+
+            # Unreachable goal
+            else:
+
+                pp_sm_state = "manual" 
+
+
+    # Confirm intent, activate autonomy
+    elif pp_sm_state == "confirm" and right_controller['primaryButton'] == True:
+
+        y = relaxed_ik_pos_gcs[1]
+        z = relaxed_ik_pos_gcs[2] + chest_pos / 1000
+
+        row, col = find_closest_point(y, z, shelf_grid)
+
+        # Run grasping script
+        if gripperState == "open":
+ 
+            trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1]]), 0.5) 
+            trajectory_sampler(np.array([x_grasp, shelf_grid[row, col][0], shelf_grid[row, col][1]]), 1) 
+            rospy.sleep(1)
+            gripper_control(3, 0.7)
+            rospy.sleep(1)
+            trajectory_sampler(np.array([x_grasp, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.03]), 1) 
+            trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.03]), 1)  
+
+            gripperState = "close"
+        
+        # Run placing script
+        elif gripperState == "close":
+
+            trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.03]), 0.5) 
+            trajectory_sampler(np.array([x_grasp, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.03]), 1) 
+            trajectory_sampler(np.array([x_grasp, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.005]), 1) 
+            gripper_control(3, 0.0)
+            rospy.sleep(1)
+            trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.01]), 1) 
+
+            gripperState = "open"
+     
+        pp_sm_state = "manual"
+
+
+    # Cancel autonomy, return control
+    elif pp_sm_state == "confirm" and right_controller['gripButton'] == True:
+
+
+        pp_sm_state = "manual"
+
+
 if __name__ == '__main__':
     # Initialize the node
     rospy.init_node("coordinate_converter", anonymous=True)
@@ -574,6 +704,10 @@ if __name__ == '__main__':
     gripperValue = 0.0
 
     motionFinished = False
+
+    # Autonomy
+    shelf_grid = generate_grid(5, 3, -0.023, 1.615, [0.298, 0.290, 0.305, 0.280], [0.25, 0.25])
+    pp_sm_state = "manual"
 
     # Publishing
     setpoint_pub = rospy.Publisher('/relaxed_ik/ee_pose_goals', EEPoseGoals, queue_size=1)
