@@ -16,11 +16,27 @@ from relaxed_ik_ros1.srv import activate_ik
 import gopher_ros_clearcore.msg as clearcore_msg
 import gopher_ros_clearcore.srv as clearcore_srv
 
-# 0 - manual, 1 - stabilization, 2 - scaled
-CHEST_CONTROL_MODE = 2
+# 0 - manual, 1 - proximity, 2 - scaled
+CHEST_CONTROL_MODE = 1
 
 
 # # # Chest # # #
+# Check if the chest goal is reachable
+def validgoal(goal):
+
+    max_chest = 440
+    min_chest = 0.0
+
+    # if the new chest position will be out of range, return False
+    if goal > max_chest:
+        return max_chest
+    elif goal < min_chest:
+        return min_chest
+    else:
+        return goal
+
+
+# NOTE: chest position is not real time, has some delay
 def chest_position_callback(data):
     global chest_pos
 
@@ -98,8 +114,9 @@ def calibrate_arm_boundaries_sm():
 
 # Implements different chest mapping methods
 def chest_mapping():
-    global right_controller, input_pos_gcs, chest_pos, operator_arm_boundary
+    global right_controller, input_pos_gcs, chest_pos, goal_chest, operator_arm_boundary
     global onTrackingStart, isInitialized
+    global onLowerLimit, onHigherLimit, GoalSet
 
     if isInitialized:
         # Chest manual joystick control
@@ -116,8 +133,77 @@ def chest_mapping():
             chest_vel_pub.publish(msg)
 
 
+        elif CHEST_CONTROL_MODE == 1:
+
+            chest_increment = 220
+            upper_limit = relaxed_ik_boundary['z_max'] - 0.2
+            lower_limit = relaxed_ik_boundary['z_min'] + 0.2
+
+            ee_z_global = relaxed_ik_pos_gcs[2]
+
+            # Start tracking if gripButton was pressed
+            if right_controller['gripButton'] == True:
+                
+                # If end-effector is close to highest boundary of reachability
+                if ee_z_global > upper_limit and not GoalSet and chest_pos != 440:
+                    
+                    # Set higher limit and new goal flag to true 
+                    onHigherLimit = True
+                    GoalSet = True   
+
+                    # Set the new goal and publish new chest position
+                    goal_chest = validgoal(chest_pos + chest_increment)     
+
+                    msg = clearcore_msg.Position()
+                    msg.position = validgoal(goal_chest)
+                    msg.velocity = 1.0
+                    chest_abspos_pub.publish(msg)
+
+
+                # If end-effector is close to lowest boundary of reachability
+                elif ee_z_global < lower_limit and not GoalSet and chest_pos != 0:
+                    
+                    # Set higher limit and new goal flag to true 
+                    onLowerLimit = True
+                    GoalSet = True       
+
+                    goal_chest = validgoal(chest_pos - chest_increment)
+
+                    msg = clearcore_msg.Position()
+                    msg.position = validgoal(goal_chest)
+                    msg.velocity = 1.0
+                    chest_abspos_pub.publish(msg)
+
+                elif abs(chest_pos - goal_chest) <= 1:
+                    
+                    if  onHigherLimit:
+                        onHigherLimit = False
+                        GoalSet = False
+
+                    elif onLowerLimit:
+                        onLowerLimit = False
+                        GoalSet = False
+
+                    calculate_controller_ee_diff()
+
+            # Stop tracking if gripButton was released
+            else:
+                # Set the flag
+                onTrackingStart['chest'] = True
+
+                # Stop chest
+                msg = geom_msgs.Twist()
+                msg.linear.z = 0.0
+                chest_vel_pub.publish(msg)
+
+                # Reset flags
+                onHigherLimit = False
+                onLowerLimit = False
+                GoalSet = False  
+
+
         # Chest scaled motion mapping
-        if CHEST_CONTROL_MODE == 2:
+        elif CHEST_CONTROL_MODE == 2:
 
             # Start tracking if gripButton was pressed
             if right_controller['gripButton'] == True:
@@ -172,82 +258,115 @@ def kinova_mapping():
 
     global right_controller, operator_arm_boundary
     global oculus_kinova_pos_diff_gcs, relaxedik_kinova_pos_diff_kcs
-    global onTrackingStart
+    global onTrackingStart, isInitialized
     global gripperButtonState, gripperButtonReleased 
-    
-    # Start tracking if gripButton was pressed
-    if right_controller['gripButton'] == True: 
-        # # POSITION
-        # Transition from Left-handed CS (Unity) to Right-handed CS (Global): swap y and z axis
-        # Then swap x and new y (which was z) to have x facing forward
-        # Negate new y (which is x) to make it align with a global coordinate system
-        input_pos_gcs = np.array([-1 * right_controller['controller_pos_z'], right_controller['controller_pos_x'], right_controller['controller_pos_y']])
+    global onLowerLimit, onHigherLimit, z_diff, prev_z
 
-        # Chest manual joystick control
-        if CHEST_CONTROL_MODE == 0:
-            # On first press recalculate transition (difference) from oculus to 
-            if onTrackingStart['right_arm'] == True:
-                calculate_controller_ee_diff()        
+    if isInitialized:
+        
+        # Start tracking if gripButton was pressed
+        if right_controller['gripButton'] == True: 
+            # # POSITION
+            # Transition from Left-handed CS (Unity) to Right-handed CS (Global): swap y and z axis
+            # Then swap x and new y (which was z) to have x facing forward
+            # Negate new y (which is x) to make it align with a global coordinate system
+            input_pos_gcs = np.array([-1 * right_controller['controller_pos_z'], right_controller['controller_pos_x'], right_controller['controller_pos_y']])
 
-                # Remove the flag
-                onTrackingStart['right_arm'] = False
+            # Chest manual joystick control
+            if CHEST_CONTROL_MODE == 0:
+                # On first press recalculate transition (difference) from oculus to 
+                if onTrackingStart['right_arm'] == True:
+                    calculate_controller_ee_diff()        
 
-            # Compesantion for controller and GCS misalignment
-            relaxed_ik_pos_gcs = input_pos_gcs - oculus_kinova_pos_diff_gcs
-
-            relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
-
-
-        # Chest scaled motion mapping
-        elif CHEST_CONTROL_MODE == 2:
-            # Map (scale) controller position within user arm motion range onto Kinova motion range
-            scaled_z = np.interp(input_pos_gcs[2], 
-                                [operator_arm_boundary['min'], operator_arm_boundary['max']], 
-                                [relaxed_ik_boundary['z_min'], relaxed_ik_boundary['z_max']])
-
-
-            # Safety feature: only start tracking if controller mapped Z coordinate is within 0.01 m of Kinova current Z coordinate (because of absolute coordinates)
-            if onTrackingStart['right_arm'] == True and abs(relaxed_ik_pos_gcs[2] - scaled_z) < 0.01:
-                calculate_controller_ee_diff()        
-
-                # Remove the flag
-                onTrackingStart['right_arm'] = False 
-
-            # Tracking has started
-            elif onTrackingStart['right_arm'] == False:
+                    # Remove the flag
+                    onTrackingStart['right_arm'] = False
 
                 # Compesantion for controller and GCS misalignment
-                relaxed_ik_pos_gcs[0:2] = input_pos_gcs[0:2] - oculus_kinova_pos_diff_gcs[0:2]
-
-                # Update Z with new scaled Z
-                relaxed_ik_pos_gcs[2] = scaled_z
+                relaxed_ik_pos_gcs = input_pos_gcs - oculus_kinova_pos_diff_gcs
 
                 relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
 
 
-    # Stop tracking if gripButton was released
-    else:
-        # Reset the flag
-        onTrackingStart['right_arm'] = True
+            elif CHEST_CONTROL_MODE == 1:
+                if onTrackingStart['right_arm'] == True:
+                    calculate_controller_ee_diff()        
 
-        # TODO: stop any robot motion
+                    # Remove the flag
+                    onTrackingStart['right_arm'] = False
+                
+                # If end-effector is close to lower or higher boundary
+                if onHigherLimit or onLowerLimit:
+                    
+                    if abs(prev_z - chest_pos) > 1:
+                        
+                        # Calculate difference between previous and current chest position
+                        # And convert to meters
+                        delta = abs(prev_z - chest_pos) / 1000
 
-    # Gripper
-    if right_controller['triggerButton']:
-        gripperButtonState = True
-        
-        # Call gripper state machine
-        gripper_sm()
+                        # Add compensation for the end-effector
+                        if onHigherLimit: z_diff[2] = z_diff[2] - delta
+                        elif onLowerLimit: z_diff[2] = z_diff[2] + delta
 
-        gripperButtonReleased = False
+                        # Publish new position to relaxedIK taking into account compensation 
+                        # for the end-effector (e.g. how much the chest has moved up or down)
+                        relaxed_ik_pos_gcs = input_pos_gcs + z_diff - oculus_kinova_pos_diff_gcs
+                        relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
 
-    else:
-        gripperButtonState = False
-        
-        # Call gripper state machine
-        gripper_sm()
+                        prev_z = chest_pos
 
-        gripperButtonReleased = True
+                elif not onLowerLimit and not onHigherLimit:
+
+                    relaxed_ik_pos_gcs = input_pos_gcs + z_diff - oculus_kinova_pos_diff_gcs
+                    relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
+
+            # Chest scaled motion mapping
+            elif CHEST_CONTROL_MODE == 2:
+                # Map (scale) controller position within user arm motion range onto Kinova motion range
+                scaled_z = np.interp(input_pos_gcs[2], 
+                                    [operator_arm_boundary['min'], operator_arm_boundary['max']], 
+                                    [relaxed_ik_boundary['z_min'], relaxed_ik_boundary['z_max']])
+
+                # Safety feature: only start tracking if controller mapped Z coordinate is within 0.05 m of Kinova current Z coordinate (because of absolute coordinates)
+                if onTrackingStart['right_arm'] == True and abs(relaxed_ik_pos_gcs[2] - scaled_z) < 0.05:
+                    calculate_controller_ee_diff()        
+
+                    # Remove the flag
+                    onTrackingStart['right_arm'] = False 
+
+                # Tracking has started
+                elif onTrackingStart['right_arm'] == False:
+
+                    # Compesantion for controller and GCS misalignment
+                    relaxed_ik_pos_gcs[0:2] = input_pos_gcs[0:2] - oculus_kinova_pos_diff_gcs[0:2]
+
+                    # Update Z with new scaled Z
+                    relaxed_ik_pos_gcs[2] = scaled_z
+
+                    relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
+
+        # Stop tracking if gripButton was released
+        else:
+            # Reset the flag
+            onTrackingStart['right_arm'] = True
+
+            # TODO: stop any robot motion
+
+        # Gripper
+        if right_controller['triggerButton']:
+            gripperButtonState = True
+            
+            # Call gripper state machine
+            gripper_sm()
+
+            gripperButtonReleased = False
+
+        else:
+            gripperButtonState = False
+            
+            # Call gripper state machine
+            gripper_sm()
+
+            gripperButtonReleased = True
 
 
 # Publish target position and orientation in World Coordinate system (same as Global CS, but Z contains a chest height)
@@ -289,7 +408,6 @@ def relaxed_ik_pub_target_gcs(target_position_gcs, target_orientation_gcs):
     # Update relaxed_ik global variable
     relaxed_ik_pos_gcs = target_position_gcs.copy()
 
-
     # Apply limits
     if relaxed_ik_pos_gcs[0] < relaxed_ik_boundary['x_min']:
         relaxed_ik_pos_gcs[0] = relaxed_ik_boundary['x_min']
@@ -320,7 +438,6 @@ def relaxed_ik_pub_target_gcs(target_position_gcs, target_orientation_gcs):
         relaxed_ik_pos_gcs[2] = relaxed_ik_boundary['z_max']
 
         calculate_controller_ee_diff()
-
 
     # Recalculate into relaxed IK CS
     relaxed_ik_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], target_position_gcs)
@@ -395,7 +512,9 @@ def right_callback(data):
 # Calculates the difference between the end effector (relaxed_IK) and the controller coordinates
 def calculate_controller_ee_diff():
     global input_pos_gcs, relaxed_ik_pos_gcs, oculus_kinova_pos_diff_gcs  
-    global isInitialized
+    global isInitialized, z_diff
+
+    z_diff = np.array([0.0, 0.0, 0.0])
 
     if isInitialized:
         # Calculate tranformation matrices
@@ -509,7 +628,10 @@ if __name__ == '__main__':
 
     # Variables
     isInitialized = False
-    
+    onHigherLimit = False
+    onLowerLimit = False
+    GoalSet = False
+
     kinova_pos_gcs = np.array([0.0, 0.0, 0.0])
     kinova_pos_kcs = np.array([0.0, 0.0, 0.0])
     relaxed_ik_pos_gcs = np.array([0.0, 0.0, 0.0])
@@ -531,11 +653,13 @@ if __name__ == '__main__':
     operator_arm_boundary = {'min': 1.03, 'max': 1.73}
     calibrate_arm_boundaries_state = 0
 
-    relaxed_ik_boundary = {"x_min": -0.3, "x_max": 0.3, "y_min": -0.4, "y_max": 1.0, "z_min": 0.0, "z_max": 1.3}
+    relaxed_ik_boundary = {"x_min": -0.3, "x_max": 0.3, "y_min": -np.inf, "y_max": np.inf, "z_min": 0.0, "z_max": 1.3}
 
     # Chest
     chest_vel = 0.0
     chest_pos = 440.0
+    goal_chest = 440.0
+    prev_z = 220.0
     oculus_chest_diff = 0.0 
 
     # Flags
@@ -616,6 +740,11 @@ if __name__ == '__main__':
         # Move the chest to middle position
         chest_abspos_srv(220, 1.0)
 
+    if CHEST_CONTROL_MODE == 1 or CHEST_CONTROL_MODE == 2:
+
+        # Move the chest to middle position
+        chest_abspos_srv(220, 1.0)
+
         # Move Kinova to the middle position
         relaxed_ik_pub_target_gcs(np.array([0, -0.1, 0.5]), [1, 0, 0, 0])
 
@@ -635,5 +764,5 @@ if __name__ == '__main__':
 
     # Main loop
     while not rospy.is_shutdown():
-        kinova_mapping()
         chest_mapping()
+        kinova_mapping()
