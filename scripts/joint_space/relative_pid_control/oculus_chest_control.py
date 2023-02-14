@@ -16,8 +16,11 @@ from relaxed_ik_ros1.srv import activate_ik
 import gopher_ros_clearcore.msg as clearcore_msg
 import gopher_ros_clearcore.srv as clearcore_srv
 
-# 0 - manual, 1 - stabilization, 2 - scaled
-CHEST_CONTROL_MODE = 2
+# 0 - manual, 1 - proximity, 2 - scaling
+CHEST_CONTROL_MODE = 0
+
+operator_arm_boundary = {'min': 1.03, 'max': 1.73}
+relaxed_ik_boundary = {"x_min": -np.inf, "x_max": 0.4, "y_min": -np.inf, "y_max": np.inf, "z_min": 0.0, "z_max": 1.4}
 
 
 # # # Chest # # #
@@ -159,7 +162,7 @@ def calculate_gcs_kcs_trans():
     # Rotate around y and z axis
     xaxis, yaxis, zaxis = (1, 0, 0), (0, 1, 0), (0, 0, 1)
     Rx = T.rotation_matrix(math.radians(0.0), xaxis)
-    Ry = T.rotation_matrix(math.radians(-45.0), yaxis)
+    Ry = T.rotation_matrix(math.radians(-48.2), yaxis)
     Rz = T.rotation_matrix(math.radians(90.0), zaxis)
 
     R_gcs_to_kcs = T.concatenate_matrices(Rx, Ry, Rz)
@@ -458,7 +461,7 @@ def gripper_sm():
             gripperState = "close"
 
             # Close the gripper
-            gripper_control(3, 0.6)
+            gripper_control(3, 0.7)
 
         elif gripperState == "close" and gripperButtonState and gripperButtonReleased:
             # Change gripper state
@@ -684,10 +687,7 @@ if __name__ == '__main__':
                         'controller_rot_w': 0.0, 'controller_rot_x': 0.0, 'controller_rot_y': 0.0, 'controller_rot_z': 0.0   
                         }
 
-    operator_arm_boundary = {'min': 1.03, 'max': 1.73}
     calibrate_arm_boundaries_state = 0
-
-    relaxed_ik_boundary = {"x_min": -0.3, "x_max": 0.3, "y_min": -0.4, "y_max": 1.0, "z_min": 0.0, "z_max": 1.3}
 
     # Chest
     chest_vel = 0.0
@@ -739,8 +739,8 @@ if __name__ == '__main__':
     # Home the chest
     chest_homing_srv(True)
 
-    # Set 30% velocity
-    pid_vel_limit_srv(0.3)
+    # Set 20% velocity
+    pid_vel_limit_srv(0.2)
 
     # Homing position
     print("\nHoming has started...\n")
@@ -771,19 +771,19 @@ if __name__ == '__main__':
         # Controller to chest position calibration
         calculate_controller_chest_diff()
 
-        print("\nMoving to the starting position...\n") 
+    print("\nMoving to the starting position...\n") 
 
-        # Move the chest to middle position
-        chest_abspos_srv(220, 1.0)
-
-        # Move Kinova to the middle position
-        relaxed_ik_pub_target_gcs(np.array([0, -0.1, 0.5]), [1, 0, 0, 0])
-
-        # Block until the motion is finished
-        wait_motion_finished()
+    # Move the chest to middle position
+    chest_abspos_srv(220, 0.6)
 
     # Set 100% velocity
     pid_vel_limit_srv(1.0)
+
+    # Move Kinova to the middle position
+    trajectory_sampler(np.array([0, -0.1, 0.5 + 0.44]), 2) 
+
+    # Block until the motion is finished
+    rospy.sleep(3)
 
     # Activate chest feedback
     chest_logger_srv(True)
