@@ -12,6 +12,7 @@ import geometry_msgs.msg as geom_msgs
 from std_msgs.msg import *
 from kortex_driver.msg import *
 from kortex_driver.srv import *
+from kinova_positional_control.msg import AutonomyInfo
 import kinova_positional_control.srv as posctrl_srv
 from relaxed_ik_ros1.srv import activate_ik
 import gopher_ros_clearcore.msg as clearcore_msg
@@ -124,7 +125,8 @@ def calibrate_arm_boundaries_sm():
 def chest_mapping():
     global right_controller, input_pos_gcs, chest_pos, goal_chest, operator_arm_boundary, relaxed_ik_pos_gcs
     global onTrackingStart, isInitialized
-    global onLowerLimit, onHigherLimit, GoalSet
+    global onLowerLimit, onHigherLimit, GoalSet, aut_activation_prox, aut_bool
+
 
     if isInitialized:
         # Chest manual joystick control
@@ -155,6 +157,10 @@ def chest_mapping():
                 # If end-effector is close to highest boundary of reachability
                 if ee_z_global > upper_limit and not GoalSet and chest_pos != 440:
                     
+                    #Autonomy activated increment
+                    aut_activation_prox += 1
+                    aut_bool = True
+
                     # Set higher limit and new goal flag to true 
                     onHigherLimit = True
                     GoalSet = True   
@@ -171,6 +177,9 @@ def chest_mapping():
                 # If end-effector is close to lowest boundary of reachability
                 elif ee_z_global < lower_limit and not GoalSet and chest_pos != 0:
                     
+                    #Autonomy activated increment
+                    aut_bool = True
+
                     # Set higher limit and new goal flag to true 
                     onLowerLimit = True
                     GoalSet = True       
@@ -192,6 +201,8 @@ def chest_mapping():
                         onLowerLimit = False
                         GoalSet = False
 
+                    aut_bool = False
+
                     calculate_controller_ee_diff()
 
             # Stop tracking if gripButton was released
@@ -205,10 +216,16 @@ def chest_mapping():
                 chest_vel_pub.publish(msg)
 
                 # Reset flags
+                aut_bool = False
                 onHigherLimit = False
                 onLowerLimit = False
                 GoalSet = False  
 
+            autonomy_prox = AutonomyInfo()
+            autonomy_prox.aut_on = aut_bool
+            autonomy_prox.aut_activations = aut_activation_prox
+            autonomy_prox_pub.publish(autonomy_prox)
+            
 
         # Chest scaled motion mapping
         elif CHEST_CONTROL_MODE == 2:
@@ -822,6 +839,7 @@ if __name__ == '__main__':
     onHigherLimit = False
     onLowerLimit = False
     GoalSet = False
+    aut_bool = False
 
     kinova_pos_gcs = np.array([0.0, 0.0, 0.0])
     kinova_pos_kcs = np.array([0.0, 0.0, 0.0])
@@ -849,7 +867,8 @@ if __name__ == '__main__':
     goal_chest = 440.0
     prev_z = 220.0
     oculus_chest_diff = 0.0 
-
+    aut_activation_prox = 0
+    
     # Flags
     onTrackingStart = {'right_arm': True, 'chest': True}
     onStartup = {'right_arm': True, 'chest': True}
@@ -871,7 +890,8 @@ if __name__ == '__main__':
     relaxed_ik_target_wcs_pub = rospy.Publisher('/relaxed_ik/position_wcs', Float32MultiArray, queue_size=1)
     chest_vel_pub = rospy.Publisher('z_chest_vel', geom_msgs.Twist, queue_size=1)
     chest_abspos_pub = rospy.Publisher('/z_chest_pos', clearcore_msg.Position, queue_size=1)
-    
+    autonomy_prox_pub = rospy.Publisher('/autonomy_proximity', AutonomyInfo, queue_size=1)
+
     # Subscribing
     rospy.Subscriber('/pid/motion_finished', Bool, pid_motion_finished_callback)
     rospy.Subscriber('/chest_position', geom_msgs.Point, chest_position_callback)
