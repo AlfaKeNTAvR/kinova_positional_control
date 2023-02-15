@@ -4,6 +4,7 @@ import rospy
 import transformations as T
 import numpy as np
 import math
+import argparse
 
 from ros_tcp_endpoint_msgs.msg import ControllerInput
 from relaxed_ik_ros1.msg import EEPoseGoals
@@ -15,9 +16,13 @@ import kinova_positional_control.srv as posctrl_srv
 from relaxed_ik_ros1.srv import activate_ik
 import gopher_ros_clearcore.msg as clearcore_msg
 import gopher_ros_clearcore.srv as clearcore_srv
+ 
+parser = argparse.ArgumentParser(description='Process some integers.')
+parser.add_argument('-m', '--mode', action='store', default=0, help='chest control mode: 0 - manual, 1 - auto: proximity, 2 - auto: scaling')
+args = vars(parser.parse_args())
 
 # 0 - manual, 1 - proximity, 2 - scaling
-CHEST_CONTROL_MODE = 0
+CHEST_CONTROL_MODE = int(args['mode'])
 
 operator_arm_boundary = {'min': 1.03, 'max': 1.73}
 relaxed_ik_boundary = {"x_min": -np.inf, "x_max": 0.4, "y_min": -np.inf, "y_max": np.inf, "z_min": 0.0, "z_max": 1.4}
@@ -117,7 +122,7 @@ def calibrate_arm_boundaries_sm():
 
 # Implements different chest mapping methods
 def chest_mapping():
-    global right_controller, input_pos_gcs, chest_pos, goal_chest, operator_arm_boundary
+    global right_controller, input_pos_gcs, chest_pos, goal_chest, operator_arm_boundary, relaxed_ik_pos_gcs
     global onTrackingStart, isInitialized
     global onLowerLimit, onHigherLimit, GoalSet
 
@@ -142,7 +147,7 @@ def chest_mapping():
             upper_limit = relaxed_ik_boundary['z_max'] - 0.2
             lower_limit = relaxed_ik_boundary['z_min'] + 0.2
 
-            ee_z_global = relaxed_ik_pos_gcs[2]
+            ee_z_global = relaxed_ik_pos_gcs[2].copy()
 
             # Start tracking if gripButton was pressed
             if right_controller['gripButton'] == True:
@@ -450,13 +455,13 @@ def relaxed_ik_pub_target_gcs(target_position_gcs, target_orientation_gcs):
         calculate_controller_ee_diff()
 
     # Recalculate into relaxed IK CS
-    relaxed_ik_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], target_position_gcs)
+    relaxed_ik_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], relaxed_ik_pos_gcs)
 
     # TODO: orientation
     relaxed_ik_pub_target_rikcs(relaxed_ik_pos_rikcs, target_orientation_gcs)
 
     # Add chest height to Z for WCS
-    relaxed_ik_pos_wcs = target_position_gcs.copy()
+    relaxed_ik_pos_wcs = relaxed_ik_pos_gcs.copy()
     relaxed_ik_pos_wcs[2] = relaxed_ik_pos_wcs[2] + chest_pos / 1000
 
     relaxed_ik_pub_commanded_wcs(relaxed_ik_pos_wcs, target_orientation_gcs)
@@ -631,6 +636,8 @@ def node_shutdown():
     # Deactivate chest feedback
     chest_logger_srv(False)
 
+    print("\nNode has shut down.")
+
 
 # Samples and executes trajectory based on the target goal in WCS and duration
 def trajectory_sampler(target_pos_wcs, duration):
@@ -655,6 +662,8 @@ def trajectory_sampler(target_pos_wcs, duration):
         relaxed_ik_pub_target_wcs(samples[i], [1, 0, 0, 0])
 
         rospy.Rate(loop_frequency).sleep()
+
+        if rospy.is_shutdown(): break
 
 
 def generate_grid(rows, columns, top_right_x, top_right_y, row_distances, column_distances):
@@ -777,8 +786,8 @@ def pick_place_autonomy_sm():
 
 
     # Cancel autonomy, return control
-    elif pp_sm_state == "confirm" and right_controller['gripButton'] == True:
-
+    elif pp_sm_state == "confirm" and (right_controller['gripButton'] == True or            # If gripButton was pressed
+        (CHEST_CONTROL_MODE == 0 and abs(right_controller['joystick_pos_y']) > 0.05)):      # OR if control mode is manual and joystick was moved
 
         pp_sm_state = "manual"
 
@@ -881,7 +890,7 @@ if __name__ == '__main__':
     # Block until the motion is finished
     wait_motion_finished()
 
-    print("Homing has finished.\n") 
+    print("\nHoming has finished.\n") 
 
     # Open the gripper
     gripper_control(3, 0.0)
@@ -918,7 +927,7 @@ if __name__ == '__main__':
     # Set the flag and finish initialization
     isInitialized = True
 
-    print("System is ready.\n") 
+    print("\nSystem is ready.\n") 
 
     # Main loop
     while not rospy.is_shutdown():
