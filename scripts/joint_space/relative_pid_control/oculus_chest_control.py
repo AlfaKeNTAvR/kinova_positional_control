@@ -375,8 +375,8 @@ def kinova_mapping():
             gripperButtonReleased = True
 
 
-    # Call pick and place autonomy state machine
-    pick_place_autonomy_sm()
+        # Call pick and place autonomy state machine
+        pick_place_autonomy_sm()
 
 
 # Publish target position and orientation in World Coordinate system (same as Global CS, but Z contains a chest height)
@@ -707,12 +707,12 @@ def pick_place_autonomy_sm():
     x_grasp = 0.53
     x_place = 0.54
 
-    if pp_sm_state == "manual" and right_controller['primaryButton'] == True:
+    if pp_sm_state == "manual" and right_controller['primaryButton'] == True and right_controller['gripButton'] == False:
 
         pp_sm_state = "intent"
 
 
-    elif pp_sm_state == "intent" and right_controller['primaryButton'] == False:  
+    elif pp_sm_state == "intent" and right_controller['primaryButton'] == False and right_controller['gripButton'] == False:  
 
         y = relaxed_ik_pos_gcs[1]
         z = relaxed_ik_pos_gcs[2] + chest_pos / 1000
