@@ -125,6 +125,7 @@ def chest_mapping():
     global right_controller, input_pos_gcs, chest_pos, goal_chest, operator_arm_boundary, relaxed_ik_pos_gcs
     global onTrackingStart, isInitialized
     global onLowerLimit, onHigherLimit, GoalSet
+    global isTracking
 
     if isInitialized:
         # Chest manual joystick control
@@ -213,19 +214,19 @@ def chest_mapping():
         # Chest scaled motion mapping
         elif CHEST_CONTROL_MODE == 2:
 
-            # Start tracking if gripButton was pressed
-            if right_controller['gripButton'] == True:
+            # Start tracking if tracking mode was activated
+            if isTracking == True:
 
                 # Map (scale) controller position within user arm motion range onto chest motion range
                 scaled_chest_pos = np.interp(input_pos_gcs[2] * 1000 - oculus_chest_diff, 
                                             [operator_arm_boundary['min'] * 1000 - oculus_chest_diff, operator_arm_boundary['max'] * 1000 - oculus_chest_diff], 
                                             [0, 440])
 
-                # Safety feature: only start tracking if controller mapped Z coordinate is within 10 mm of chest current Z coordinate (because of absolute coordinates)
-                if onTrackingStart['chest'] == True and abs(chest_pos - scaled_chest_pos) < 10:
+                # Safety feature: only start tracking if controller mapped Z coordinate is within 20 mm of chest current Z coordinate (because of absolute coordinates)
+                if onTrackingStart['chest'] == True and abs(chest_pos - scaled_chest_pos) < 20:
                     calculate_controller_ee_diff()        
 
-                    # Remove the flag
+                    # Remove flags
                     onTrackingStart['right_arm'] = False
                     onTrackingStart['chest'] = False 
 
@@ -237,9 +238,10 @@ def chest_mapping():
                     chest_abspos_pub.publish(msg)
 
 
-            # Stop tracking if gripButton was released
+            # Stop tracking if tracking mode was deactivated
             else:
-                # Set the flag
+                # Set flags
+                onTrackingStart['right_arm'] = True
                 onTrackingStart['chest'] = True
 
                 # Stop chest
@@ -272,6 +274,7 @@ def kinova_mapping():
     global onTrackingStart, isInitialized
     global gripperButtonState, gripperButtonReleased 
     global onLowerLimit, onHigherLimit, z_diff, prev_z
+    global isTracking
 
     if isInitialized:
         
@@ -325,37 +328,37 @@ def kinova_mapping():
                     relaxed_ik_pos_gcs = input_pos_gcs + z_diff - oculus_kinova_pos_diff_gcs
                     relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
 
-            # Chest scaled motion mapping
-            elif CHEST_CONTROL_MODE == 2:
+        # Stop tracking if gripButton was released
+        else:
+            # Reset the flag
+            if CHEST_CONTROL_MODE != 2:
+                onTrackingStart['right_arm'] = True
+
+            # TODO: stop any robot motion
+        
+        
+        # Chest scaled motion mapping
+        if CHEST_CONTROL_MODE == 2:
+
+            # Tracking has started
+            if isTracking == True and onTrackingStart['right_arm'] == False:
                 # Map (scale) controller position within user arm motion range onto Kinova motion range
                 scaled_z = np.interp(input_pos_gcs[2], 
                                     [operator_arm_boundary['min'], operator_arm_boundary['max']], 
                                     [relaxed_ik_boundary['z_min'], relaxed_ik_boundary['z_max']])
 
-                # Safety feature: only start tracking if controller mapped Z coordinate is within 0.05 m of Kinova current Z coordinate (because of absolute coordinates)
-                if onTrackingStart['right_arm'] == True and abs(relaxed_ik_pos_gcs[2] - scaled_z) < 0.05:
-                    calculate_controller_ee_diff()        
+                # Compesantion for controller and GCS misalignment
+                relaxed_ik_pos_gcs[0:2] = input_pos_gcs[0:2] - oculus_kinova_pos_diff_gcs[0:2]
 
-                    # Remove the flag
-                    onTrackingStart['right_arm'] = False 
+                # Scale X and Y
+                relaxed_ik_pos_gcs[0] = relaxed_ik_pos_gcs[0] * 1.0
+                relaxed_ik_pos_gcs[1] = relaxed_ik_pos_gcs[1] * 1.0
 
-                # Tracking has started
-                elif onTrackingStart['right_arm'] == False:
+                # Update Z with new scaled Z
+                relaxed_ik_pos_gcs[2] = scaled_z
 
-                    # Compesantion for controller and GCS misalignment
-                    relaxed_ik_pos_gcs[0:2] = input_pos_gcs[0:2] - oculus_kinova_pos_diff_gcs[0:2]
+                relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
 
-                    # Update Z with new scaled Z
-                    relaxed_ik_pos_gcs[2] = scaled_z
-
-                    relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
-
-        # Stop tracking if gripButton was released
-        else:
-            # Reset the flag
-            onTrackingStart['right_arm'] = True
-
-            # TODO: stop any robot motion
 
         # Gripper
         if right_controller['triggerButton']:
@@ -500,6 +503,7 @@ def relaxed_ik_pub_target_rikcs(target_position, target_orientation):
 # Right controller topic callback function
 def right_callback(data):
     global right_controller, input_pos_gcs
+    global isTracking, isTracking_state
 
     # Update dictionary
     right_controller['primaryButton'] = data.primaryButton
@@ -522,6 +526,31 @@ def right_callback(data):
     # Then swap x and new y (which was z) to have x facing forward
     # Negate new y (which is x) to make it align with a global coordinate system
     input_pos_gcs = np.array([-1 * right_controller['controller_pos_z'], right_controller['controller_pos_x'], right_controller['controller_pos_y']])
+
+    if CHEST_CONTROL_MODE == 2:
+        # Pressed
+        if isTracking_state == 0 and right_controller['gripButton'] == True:
+
+            isTracking_state = 1
+
+        # Released
+        elif isTracking_state == 1 and right_controller['gripButton'] == False:
+
+            # Activate a tracking mode
+            isTracking = True
+            isTracking_state = 2
+
+        # Pressed
+        elif isTracking_state == 2 and right_controller['gripButton'] == True:
+
+            isTracking_state = 3
+
+        # Released
+        elif isTracking_state == 3 and right_controller['gripButton'] == False:
+
+            # Deactivate a tracking mode
+            isTracking = False
+            isTracking_state = 0
 
 
 # Calculates the difference between the end effector (relaxed_IK) and the controller coordinates
@@ -695,6 +724,7 @@ def find_closest_point(x, y, grid):
 def pick_place_autonomy_sm():
     global pp_sm_state, gripperState, right_controller, relaxed_ik_boundary
     global shelf_grid, chest_pos, relaxed_ik_pos_gcs
+    global isTracking
 
     # NOTE: Greater than Max boundary because of left most, bottom position
     z_reach_min_bound = 0.27
@@ -703,12 +733,18 @@ def pick_place_autonomy_sm():
     x_grasp = 0.53
     x_place = 0.54
 
-    if pp_sm_state == "manual" and right_controller['primaryButton'] == True and right_controller['gripButton'] == False:
+    if (pp_sm_state == "manual" and right_controller['primaryButton'] == True and
+        ((CHEST_CONTROL_MODE != 2 and right_controller['gripButton'] == False) or
+        (CHEST_CONTROL_MODE == 2 and isTracking == False))
+        ): 
 
         pp_sm_state = "intent"
 
 
-    elif pp_sm_state == "intent" and right_controller['primaryButton'] == False and right_controller['gripButton'] == False:  
+    elif (pp_sm_state == "intent" and right_controller['primaryButton'] == False and 
+        ((CHEST_CONTROL_MODE != 2 and right_controller['gripButton'] == False) or
+        (CHEST_CONTROL_MODE == 2 and isTracking == False))
+        ): 
 
         y = relaxed_ik_pos_gcs[1]
         z = relaxed_ik_pos_gcs[2] + chest_pos / 1000
@@ -844,6 +880,8 @@ if __name__ == '__main__':
     oculus_chest_diff = 0.0 
 
     # Flags
+    isTracking = False
+    isTracking_state = 0
     onTrackingStart = {'right_arm': True, 'chest': True}
     onStartup = {'right_arm': True, 'chest': True}
     
