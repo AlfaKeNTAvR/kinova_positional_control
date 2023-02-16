@@ -697,12 +697,8 @@ def pick_place_autonomy_sm():
     global shelf_grid, chest_pos, relaxed_ik_pos_gcs
 
     # NOTE: Greater than Max boundary because of left most, bottom position
-    z_reach_min_bound = 0.25
-    z_reach_max_bound = 0.2
-
-    # Motion scaling
-    if CHEST_CONTROL_MODE == 2:
-        z_reach_max_bound = 0.15
+    z_reach_min_bound = 0.27
+    z_reach_max_bound = 0.15
 
     x_grasp = 0.53
     x_place = 0.54
@@ -723,8 +719,9 @@ def pick_place_autonomy_sm():
         if gripperState == "open":
             # Reachable goal
             if (
-                abs(relaxed_ik_pos_gcs[2] - relaxed_ik_boundary['z_max']) > z_reach_max_bound and               # If ee is far from Z max
-                abs(relaxed_ik_pos_gcs[2] - relaxed_ik_boundary['z_min']) > z_reach_min_bound):                 # If ee is far from Z min
+                abs(shelf_grid[row, col][1] - chest_pos / 1000 - relaxed_ik_boundary['z_max']) > z_reach_max_bound and          # If traget is far from Z max
+                abs(shelf_grid[row, col][1] - chest_pos / 1000 - relaxed_ik_boundary['z_min']) > z_reach_min_bound              # If target is far from Z min
+                ):                 
 
                 # Show intent       
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1]]), 1)
@@ -742,13 +739,14 @@ def pick_place_autonomy_sm():
         elif gripperState == "close":
             # Reachable goal
             if (
-                abs(relaxed_ik_pos_gcs[2] - relaxed_ik_boundary['z_max']) > z_reach_max_bound and                       # If ee is far from Z max
-                abs(relaxed_ik_pos_gcs[2] - relaxed_ik_boundary['z_min']) > z_reach_min_bound):                         # If ee is far from Z min
+                abs(shelf_grid[row, col][1] + 0.025 - chest_pos / 1000 - relaxed_ik_boundary['z_max']) > z_reach_max_bound and   # If traget is far from Z max
+                abs(shelf_grid[row, col][1] + 0.025 - chest_pos / 1000 - relaxed_ik_boundary['z_min']) > z_reach_min_bound       # If target is far from Z min
+                ):                         
 
                 # Show intent
-                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.05]), 1) 
-                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'] + 0.05, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.05]), 0.5) 
-                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.05]), 0.5) 
+                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 1) 
+                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'] + 0.05, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 0.5) 
+                trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 0.5) 
 
                 pp_sm_state = "confirm"
 
@@ -774,16 +772,16 @@ def pick_place_autonomy_sm():
             rospy.sleep(1)
             gripper_control(3, 0.7)
             rospy.sleep(1)
-            trajectory_sampler(np.array([x_grasp, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.05]), 1) 
-            trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.05]), 1)  
+            trajectory_sampler(np.array([x_grasp, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 1) 
+            trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 1)  
 
             gripperState = "close"
         
         # Run placing script
         elif gripperState == "close":
 
-            trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.05]), 0.5) 
-            trajectory_sampler(np.array([x_place, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.05]), 2) 
+            trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 0.5) 
+            trajectory_sampler(np.array([x_place, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 2) 
 
             # Let a block slip
             gripper_control(3, 0.51)
