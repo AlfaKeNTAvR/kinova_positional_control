@@ -666,18 +666,12 @@ def trajectory_sampler(target_pos_wcs, duration):
         if rospy.is_shutdown(): break
 
 
-def generate_grid(rows, columns, top_right_x, top_right_y, row_distances, column_distances):
+def generate_grid(rows, columns, bottom_right_x, bottom_right_y, row_distances, column_distances):
     # Generate x coordinates
-    x_coordinates = np.linspace(top_right_x, top_right_x + sum(column_distances), columns)[::-1]
+    x_coordinates = np.linspace(bottom_right_x, bottom_right_x + sum(column_distances), columns)[::-1]
 
     # Generate y coordinates
-    y_coordinates = list()
-    y_coordinates.append(top_right_y)
-    
-    for i in range(1, rows):
-        y_coordinates.append(y_coordinates[i-1] - row_distances[i-1])
-
-    y_coordinates = np.array(y_coordinates)
+    y_coordinates = np.linspace(bottom_right_y, bottom_right_y + sum(row_distances), rows)[::-1]
 
     # Generate a grid of x and y coordinates using numpy's meshgrid function
     x_coordinates, y_coordinates = np.meshgrid(x_coordinates, y_coordinates)
@@ -863,7 +857,7 @@ if __name__ == '__main__':
     motionFinished = False
 
     # Autonomy
-    shelf_grid = generate_grid(5, 3, -0.023, 1.615, [0.298, 0.290, 0.305, 0.280], [0.25, 0.25])
+    shelf_grid = generate_grid(5, 4, -0.224, 0.449, [0.298, 0.290, 0.305, 0.280], [0.15, 0.15, 0.15])
     pp_sm_state = "manual"
 
     # Publishing
