@@ -277,11 +277,6 @@ def kinova_mapping():
         
         # Start tracking if gripButton was pressed
         if right_controller['gripButton'] == True: 
-            # # POSITION
-            # Transition from Left-handed CS (Unity) to Right-handed CS (Global): swap y and z axis
-            # Then swap x and new y (which was z) to have x facing forward
-            # Negate new y (which is x) to make it align with a global coordinate system
-            input_pos_gcs = np.array([-1 * right_controller['controller_pos_z'], right_controller['controller_pos_x'], right_controller['controller_pos_y']])
 
             # Chest manual joystick control
             if CHEST_CONTROL_MODE == 0:
@@ -504,7 +499,7 @@ def relaxed_ik_pub_target_rikcs(target_position, target_orientation):
 
 # Right controller topic callback function
 def right_callback(data):
-    global right_controller
+    global right_controller, input_pos_gcs
 
     # Update dictionary
     right_controller['primaryButton'] = data.primaryButton
@@ -522,6 +517,11 @@ def right_callback(data):
     right_controller['controller_rot_x'] = data.controller_rot_x
     right_controller['controller_rot_y'] = data.controller_rot_y
     right_controller['controller_rot_z'] = data.controller_rot_z
+
+    # Transition from Left-handed CS (Unity) to Right-handed CS (Global): swap y and z axis
+    # Then swap x and new y (which was z) to have x facing forward
+    # Negate new y (which is x) to make it align with a global coordinate system
+    input_pos_gcs = np.array([-1 * right_controller['controller_pos_z'], right_controller['controller_pos_x'], right_controller['controller_pos_y']])
 
 
 # Calculates the difference between the end effector (relaxed_IK) and the controller coordinates
@@ -823,6 +823,7 @@ if __name__ == '__main__':
     onLowerLimit = False
     GoalSet = False
 
+    input_pos_gcs = np.array([0.0, 0.0, 0.0])
     kinova_pos_gcs = np.array([0.0, 0.0, 0.0])
     kinova_pos_kcs = np.array([0.0, 0.0, 0.0])
     relaxed_ik_pos_gcs = np.array([0.0, 0.0, 0.0])
