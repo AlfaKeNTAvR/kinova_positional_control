@@ -193,7 +193,6 @@ def chest_mapping():
                         onLowerLimit = False
                         GoalSet = False
 
-                    calculate_controller_ee_diff()
 
             # Stop tracking if gripButton was released
             else:
