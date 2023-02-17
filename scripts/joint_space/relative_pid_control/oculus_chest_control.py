@@ -151,7 +151,7 @@ def chest_mapping():
             ee_z_global = relaxed_ik_pos_gcs[2].copy()
 
             # Start tracking if gripButton was pressed
-            if right_controller['gripButton'] == True:
+            if isTracking == True:
                 
                 # If end-effector is close to highest boundary of reachability
                 if ee_z_global > upper_limit and not GoalSet and chest_pos != 440:
@@ -277,8 +277,8 @@ def kinova_mapping():
 
     if isInitialized:
         
-        # Start tracking if gripButton was pressed
-        if right_controller['gripButton'] == True: 
+        # Tracking has started
+        if isTracking == True: 
 
             # Chest manual joystick control
             if CHEST_CONTROL_MODE == 0:
@@ -327,37 +327,35 @@ def kinova_mapping():
                     relaxed_ik_pos_gcs = input_pos_gcs + z_diff - oculus_kinova_pos_diff_gcs
                     relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
 
-        # Stop tracking if gripButton was released
+            # Chest scaled motion mapping
+            elif CHEST_CONTROL_MODE == 2:
+
+                # Tracking has started
+                if onTrackingStart['right_arm'] == False:
+                    # Map (scale) controller position within user arm motion range onto Kinova motion range
+                    scaled_z = np.interp(input_pos_gcs[2], 
+                                        [operator_arm_boundary['min'], operator_arm_boundary['max']], 
+                                        [relaxed_ik_boundary['z_min'], relaxed_ik_boundary['z_max']])
+
+                    # Compesantion for controller and GCS misalignment
+                    relaxed_ik_pos_gcs[0:2] = input_pos_gcs[0:2] - oculus_kinova_pos_diff_gcs[0:2]
+
+                    # Scale X and Y
+                    relaxed_ik_pos_gcs[0] = relaxed_ik_pos_gcs[0] * 1.0
+                    relaxed_ik_pos_gcs[1] = relaxed_ik_pos_gcs[1] * 1.0
+
+                    # Update Z with new scaled Z
+                    relaxed_ik_pos_gcs[2] = scaled_z
+
+                    relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
+
+        # If tracking has stopped
         else:
             # Reset the flag
             if CHEST_CONTROL_MODE != 2:
                 onTrackingStart['right_arm'] = True
 
             # TODO: stop any robot motion
-        
-        
-        # Chest scaled motion mapping
-        if CHEST_CONTROL_MODE == 2:
-
-            # Tracking has started
-            if isTracking == True and onTrackingStart['right_arm'] == False:
-                # Map (scale) controller position within user arm motion range onto Kinova motion range
-                scaled_z = np.interp(input_pos_gcs[2], 
-                                    [operator_arm_boundary['min'], operator_arm_boundary['max']], 
-                                    [relaxed_ik_boundary['z_min'], relaxed_ik_boundary['z_max']])
-
-                # Compesantion for controller and GCS misalignment
-                relaxed_ik_pos_gcs[0:2] = input_pos_gcs[0:2] - oculus_kinova_pos_diff_gcs[0:2]
-
-                # Scale X and Y
-                relaxed_ik_pos_gcs[0] = relaxed_ik_pos_gcs[0] * 1.0
-                relaxed_ik_pos_gcs[1] = relaxed_ik_pos_gcs[1] * 1.0
-
-                # Update Z with new scaled Z
-                relaxed_ik_pos_gcs[2] = scaled_z
-
-                relaxed_ik_pub_target_gcs(relaxed_ik_pos_gcs, [1, 0, 0, 0])
-
 
         # Gripper
         if right_controller['triggerButton']:
@@ -526,30 +524,29 @@ def right_callback(data):
     # Negate new y (which is x) to make it align with a global coordinate system
     input_pos_gcs = np.array([-1 * right_controller['controller_pos_z'], right_controller['controller_pos_x'], right_controller['controller_pos_y']])
 
-    if CHEST_CONTROL_MODE == 2:
-        # Pressed
-        if isTracking_state == 0 and right_controller['gripButton'] == True:
+    # Pressed
+    if isTracking_state == 0 and right_controller['gripButton'] == True:
 
-            isTracking_state = 1
+        isTracking_state = 1
 
-        # Released
-        elif isTracking_state == 1 and right_controller['gripButton'] == False:
+    # Released
+    elif isTracking_state == 1 and right_controller['gripButton'] == False:
 
-            # Activate a tracking mode
-            isTracking = True
-            isTracking_state = 2
+        # Activate a tracking mode
+        isTracking = True
+        isTracking_state = 2
 
-        # Pressed
-        elif isTracking_state == 2 and right_controller['gripButton'] == True:
+    # Pressed
+    elif isTracking_state == 2 and right_controller['gripButton'] == True:
 
-            isTracking_state = 3
+        isTracking_state = 3
 
-        # Released
-        elif isTracking_state == 3 and right_controller['gripButton'] == False:
+    # Released
+    elif isTracking_state == 3 and right_controller['gripButton'] == False:
 
-            # Deactivate a tracking mode
-            isTracking = False
-            isTracking_state = 0
+        # Deactivate a tracking mode
+        isTracking = False
+        isTracking_state = 0
 
 
 # Calculates the difference between the end effector (relaxed_IK) and the controller coordinates
@@ -723,7 +720,7 @@ def find_closest_point(x, y, grid):
 def pick_place_autonomy_sm():
     global pp_sm_state, gripperState, right_controller, relaxed_ik_boundary
     global shelf_grid, chest_pos, relaxed_ik_pos_gcs
-    global isTracking
+    global isTracking, isTracking_state
 
     # NOTE: Greater than Max boundary because of left most, bottom position
     z_reach_min_bound = 0.27
@@ -732,23 +729,22 @@ def pick_place_autonomy_sm():
     x_grasp = 0.53
     x_place = 0.54
 
-    if (pp_sm_state == "manual" and right_controller['primaryButton'] == True and
-        ((CHEST_CONTROL_MODE != 2 and right_controller['gripButton'] == False) or
-        (CHEST_CONTROL_MODE == 2 and isTracking == False))
-        ): 
+    # Controlled manually, waiting for intent autonomy activation
+    if pp_sm_state == "manual" and right_controller['primaryButton'] == True: 
+
+        isTracking = False
+        isTracking_state = 0
 
         pp_sm_state = "intent"
 
 
-    elif (pp_sm_state == "intent" and right_controller['primaryButton'] == False and 
-        ((CHEST_CONTROL_MODE != 2 and right_controller['gripButton'] == False) or
-        (CHEST_CONTROL_MODE == 2 and isTracking == False))
-        ): 
+    # Activate intent autonomy
+    elif pp_sm_state == "intent" and right_controller['primaryButton'] == False:
 
         y = relaxed_ik_pos_gcs[1]
         z = relaxed_ik_pos_gcs[2] + chest_pos / 1000
 
-
+        # Get row and column of the closest point of grid
         row, col = find_closest_point(y, z, shelf_grid)
 
         if gripperState == "open":
@@ -791,7 +787,7 @@ def pick_place_autonomy_sm():
                 pp_sm_state = "manual" 
 
 
-    # Confirm intent, activate autonomy
+    # Confirm intent, activate pick and place autonomy
     elif pp_sm_state == "confirm" and right_controller['primaryButton'] == True:
 
         y = relaxed_ik_pos_gcs[1]
@@ -833,7 +829,7 @@ def pick_place_autonomy_sm():
 
 
     # Cancel autonomy, return control
-    elif pp_sm_state == "confirm" and (right_controller['gripButton'] == True or            # If gripButton was pressed
+    elif pp_sm_state == "confirm" and (isTracking == True or                                # If gripButton was pressed
         (CHEST_CONTROL_MODE == 0 and abs(right_controller['joystick_pos_y']) > 0.05)):      # OR if control mode is manual and joystick was moved
 
         pp_sm_state = "manual"
