@@ -648,22 +648,6 @@ def ee_callback(data):
             onStartup['right_arm'] = False   
 
 
-# This function is called when the node is shutting down
-def node_shutdown():
-    print("\nNode is shutting down...")
-
-    # Stop arm motion
-    stop_arm_srv()
-
-    # Stop chest motion
-    chest_stop_srv()
-
-    # Deactivate chest feedback
-    chest_logger_srv(False)
-
-    print("\nNode has shut down.")
-
-
 # Samples and executes trajectory based on the target goal in WCS and duration
 def trajectory_sampler(target_pos_wcs, duration):
     global relaxed_ik_pos_gcs, chest_pos
@@ -835,6 +819,73 @@ def pick_place_autonomy_sm():
         pp_sm_state = "manual"
 
 
+def initialization():
+    global isInitialized
+    
+    # Home the chest
+    chest_homing_srv(True)
+
+    # Set 20% velocity
+    pid_vel_limit_srv(0.2)
+
+    # Homing position
+    print("\nHoming has started...\n")
+
+    # Let the node initialized
+    rospy.sleep(1)
+
+    # Home using relaxedIK
+    relaxed_ik_pub_target_rikcs([0, 0, 0], [1, 0, 0, 0])
+
+    # Block until the motion is finished
+    wait_motion_finished()
+
+    print("\nHoming has finished.\n") 
+
+    # Open the gripper
+    gripper_control(3, 0.0)
+
+    # Calculate a transition between Global CS and Kinova CS
+    calculate_gcs_kcs_trans()
+
+    print("\nMoving to the starting position...\n") 
+
+    # Move the chest to middle position
+    chest_abspos_srv(220, 0.6)
+
+    # Set 100% velocity
+    pid_vel_limit_srv(1.0)
+
+    # Move Kinova to the middle position
+    trajectory_sampler(np.array([0, -0.1, 0.5 + 0.44]), 2) 
+
+    # Block until the motion is finished
+    rospy.sleep(3)
+
+    # Set the flag and finish initialization
+    isInitialized = True
+
+    print("\nSystem is ready.\n") 
+
+
+
+# This function is called when the node is shutting down
+def node_shutdown():
+    print("\nNode is shutting down...")
+
+    # Stop arm motion
+    stop_arm_srv()
+
+    # Stop chest motion
+    chest_stop_srv()
+
+    # Deactivate chest feedback
+    chest_logger_srv(False)
+
+    print("\nNode has shut down.")
+    
+
+
 if __name__ == '__main__':
     # Initialize the node
     rospy.init_node("coordinate_converter", anonymous=True)
@@ -918,32 +969,6 @@ if __name__ == '__main__':
     chest_abspos_srv = rospy.ServiceProxy('z_chest_abspos', clearcore_srv.AbsolutePosition)
     chest_logger_srv = rospy.ServiceProxy('z_chest_logger', clearcore_srv.LoggerControl)
 
-    # Home the chest
-    chest_homing_srv(True)
-
-    # Set 20% velocity
-    pid_vel_limit_srv(0.2)
-
-    # Homing position
-    print("\nHoming has started...\n")
-
-    # Let the node initialized
-    rospy.sleep(1)
-
-    # Home using relaxedIK
-    relaxed_ik_pub_target_rikcs([0, 0, 0], [1, 0, 0, 0])
-
-    # Block until the motion is finished
-    wait_motion_finished()
-
-    print("\nHoming has finished.\n") 
-
-    # Open the gripper
-    gripper_control(3, 0.0)
-
-    # Calculate a transition between Global CS and Kinova CS
-    calculate_gcs_kcs_trans()
-
     # Chest scaled motion mapping
     if CHEST_CONTROL_MODE == 2:
         # Operator arm boundary calibration
@@ -953,27 +978,11 @@ if __name__ == '__main__':
         # Controller to chest position calibration
         calculate_controller_chest_diff()
 
-    print("\nMoving to the starting position...\n") 
-
-    # Move the chest to middle position
-    chest_abspos_srv(220, 0.6)
-
-    # Set 100% velocity
-    pid_vel_limit_srv(1.0)
-
-    # Move Kinova to the middle position
-    trajectory_sampler(np.array([0, -0.1, 0.5 + 0.44]), 2) 
-
-    # Block until the motion is finished
-    rospy.sleep(3)
-
     # Activate chest feedback
     chest_logger_srv(True)
 
-    # Set the flag and finish initialization
-    isInitialized = True
-
-    print("\nSystem is ready.\n") 
+    # Initialize the robot
+    initialization() 
 
     # Main loop
     while not rospy.is_shutdown():
