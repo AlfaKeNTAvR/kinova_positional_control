@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import rospy
+import roslaunch
 import transformations as T
 import numpy as np
 import math
@@ -552,8 +553,9 @@ def right_callback(data):
 # Left controller topic callback function
 def left_callback(data):
     global left_controller
-    global isInitialized
+    global isInitialized, isTracking, isTracking_state
     global initButton_state, estopButton_state, clearfaultButton_state
+    global pid_launch, relaxed_ik_launch
 
     # Update dictionary
     left_controller['primaryButton'] = data.primaryButton
@@ -576,6 +578,20 @@ def left_callback(data):
     if left_controller['gripButton'] == True and estopButton_state == False:
         e_stop()
 
+        print("\n E-Stop! Shutting down relaxed IK and PID...\n")
+
+        # Shutdown relaxed_IK
+        relaxed_ik_launch.shutdown()
+
+        # Shutdown PID nodes
+        pid_launch.shutdown()
+
+        print("\n E-Stop! Relaxed IK and PID have shutdown.\n")
+
+        # Reset the flag
+        isTracking = False
+        isTracking_state = 0
+
         # Change the state
         estopButton_state = True
 
@@ -584,8 +600,50 @@ def left_callback(data):
         estopButton_state = False
 
 
+    # Clear arm faults
+    if left_controller['secondaryButton'] == True and clearfaultButton_state == 0:
+        clearfaults_arm_srv() 
+
+        # Reset the flag
+        isInitialized = False
+
+        # Change the state
+        clearfaultButton_state = 1
+
+        print("\n Faults cleared, restore an arm position.\n")
+
+    elif left_controller['secondaryButton'] == False and clearfaultButton_state == 1:
+
+        # Change the state
+        clearfaultButton_state = 2
+
+    elif left_controller['secondaryButton'] == True and clearfaultButton_state == 2:
+
+        # Change the state
+        clearfaultButton_state = 3
+
+    elif left_controller['secondaryButton'] == False and clearfaultButton_state == 3:
+
+        # Change the state
+        clearfaultButton_state = 0
+
+
     # Initialize the robot, home chest and arm
     if left_controller['primaryButton'] == True and initButton_state == False:
+
+        print("\n Initialization, starting relaxed IK and PID...\n")
+        
+        # Start the relaxed IK
+        roslaunch_relaxed_ik()
+
+        # Launch PID nodes
+        roslaunch_pid()
+
+        rospy.sleep(5)
+
+        print("\n Initialization, relaxed IK and PID have started. Homing...\n")
+
+        # Initialize the robot
         initialization()
 
         # Change the state
@@ -594,21 +652,6 @@ def left_callback(data):
     elif left_controller['primaryButton'] == False and initButton_state == True:
         # Change the state
         initButton_state = False
-
-
-    # Clear arm faults
-    if left_controller['secondaryButton'] == True and clearfaultButton_state == False:
-        clearfaults_arm_srv()
-
-        # Reset the flag
-        isInitialized = False
-
-        # Change the state
-        clearfaultButton_state = True
-
-    elif left_controller['secondaryButton'] == False and clearfaultButton_state == True:
-        # Change the state
-        clearfaultButton_state = False
 
 
 # Calculates the difference between the end effector (relaxed_IK) and the controller coordinates
@@ -897,7 +940,7 @@ def initialization():
     print("\nHoming has started...\n")
 
     # Let the node initialized
-    rospy.sleep(1)
+    rospy.sleep(2)
 
     # Home using relaxedIK
     relaxed_ik_pub_target_rikcs([0, 0, 0], [1, 0, 0, 0])
@@ -918,14 +961,14 @@ def initialization():
     # Move the chest to middle position
     chest_abspos_srv(220, 0.6)
 
-    # Set 100% velocity
-    pid_vel_limit_srv(1.0)
-
     # Move Kinova to the middle position
     trajectory_sampler(np.array([0, -0.1, 0.5 + 0.44]), 2) 
 
     # Block until the motion is finished
     rospy.sleep(3)
+
+    # Set 100% velocity
+    pid_vel_limit_srv(1.0)
 
     # Set the flag and finish initialization
     isInitialized = True
@@ -949,8 +992,29 @@ def e_stop():
     # TODO: pause data collector
 
 
+# Roslaunch PID
+def roslaunch_pid():
+    global pid_launch
+
+    uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
+    roslaunch.configure_logging(uuid)
+    pid_launch = roslaunch.parent.ROSLaunchParent(uuid, ['/home/fetch/catkin_workspaces/oculus_relaxedik_ws/src/kinova_pid/launch/arm_controller.launch'])
+    pid_launch.start()
+
+
+# Roslaunch relaxed IK
+def roslaunch_relaxed_ik():
+    global relaxed_ik_launch
+
+    uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
+    roslaunch.configure_logging(uuid)
+    relaxed_ik_launch = roslaunch.parent.ROSLaunchParent(uuid, ['/home/fetch/catkin_workspaces/oculus_relaxedik_ws/src/relaxed_ik_ros1/launch/relaxed_ik.launch'])
+    relaxed_ik_launch.start()
+
+
 # This function is called when the node is shutting down
 def node_shutdown():
+    global pid_launch, relaxed_ik_launch
     print("\nNode is shutting down...")
 
     # Stop arm motion
@@ -961,6 +1025,10 @@ def node_shutdown():
 
     # Deactivate chest feedback
     chest_logger_srv(False)
+
+    # Shutdown PID and relaxed IK nodes
+    pid_launch.shutdown()
+    relaxed_ik_launch.shutdown()
 
     print("\nNode has shut down.")
     
@@ -1032,6 +1100,11 @@ if __name__ == '__main__':
     clearfaultButton_state = False
 
     motionFinished = False
+
+    # Launch files
+    roslaunch_pid()
+    roslaunch_relaxed_ik()
+    rospy.sleep(2)
 
     # Autonomy
     shelf_grid = generate_grid(5, 4, -0.224, 0.449, [0.298, 0.290, 0.305, 0.280], [0.15, 0.15, 0.15])
