@@ -549,6 +549,68 @@ def right_callback(data):
         isTracking_state = 0
 
 
+# Left controller topic callback function
+def left_callback(data):
+    global left_controller
+    global isInitialized
+    global initButton_state, estopButton_state, clearfaultButton_state
+
+    # Update dictionary
+    left_controller['primaryButton'] = data.primaryButton
+    left_controller['secondaryButton'] = data.secondaryButton
+    left_controller['triggerButton'] = data.triggerButton
+    left_controller['triggerValue'] = data.triggerValue
+    left_controller['gripButton'] = data.gripButton
+    left_controller['joystickButton'] = data.joystickButton
+    left_controller['joystick_pos_x'] = data.joystick_pos_x
+    left_controller['joystick_pos_y'] = data.joystick_pos_y
+    left_controller['controller_pos_x'] = data.controller_pos_x
+    left_controller['controller_pos_y'] = data.controller_pos_y
+    left_controller['controller_pos_z'] = data.controller_pos_z
+    left_controller['controller_rot_w'] = data.controller_rot_w
+    left_controller['controller_rot_x'] = data.controller_rot_x
+    left_controller['controller_rot_y'] = data.controller_rot_y
+    left_controller['controller_rot_z'] = data.controller_rot_z
+
+    # Emergency stop
+    if left_controller['gripButton'] == True and estopButton_state == False:
+        e_stop()
+
+        # Change the state
+        estopButton_state = True
+
+    elif left_controller['gripButton'] == False and estopButton_state == True:
+        # Change the state
+        estopButton_state = False
+
+
+    # Initialize the robot, home chest and arm
+    if left_controller['primaryButton'] == True and initButton_state == False:
+        initialization()
+
+        # Change the state
+        initButton_state = True
+
+    elif left_controller['primaryButton'] == False and initButton_state == True:
+        # Change the state
+        initButton_state = False
+
+
+    # Clear arm faults
+    if left_controller['secondaryButton'] == True and clearfaultButton_state == False:
+        clearfaults_arm_srv()
+
+        # Reset the flag
+        isInitialized = False
+
+        # Change the state
+        clearfaultButton_state = True
+
+    elif left_controller['secondaryButton'] == False and clearfaultButton_state == True:
+        # Change the state
+        clearfaultButton_state = False
+
+
 # Calculates the difference between the end effector (relaxed_IK) and the controller coordinates
 def calculate_controller_ee_diff():
     global input_pos_gcs, relaxed_ik_pos_gcs, oculus_kinova_pos_diff_gcs  
@@ -821,7 +883,10 @@ def pick_place_autonomy_sm():
 
 def initialization():
     global isInitialized
-    
+
+    # Clear arm faults
+    clearfaults_arm_srv()
+
     # Home the chest
     chest_homing_srv(True)
 
@@ -867,6 +932,21 @@ def initialization():
 
     print("\nSystem is ready.\n") 
 
+
+def e_stop():
+    global isTracking, isInitialized
+
+    # E-stop arm motion
+    estop_arm_srv()
+
+    # Stop chest motion
+    chest_stop_srv()
+
+    # Reset the flag
+    isTracking = False
+    isInitialized = False
+
+    # TODO: pause data collector
 
 
 # This function is called when the node is shutting down
@@ -915,6 +995,17 @@ if __name__ == '__main__':
                         'controller_pos_x': 0.0, 'controller_pos_y': 0.0, 'controller_pos_z': 0.0,
                         'controller_rot_w': 0.0, 'controller_rot_x': 0.0, 'controller_rot_y': 0.0, 'controller_rot_z': 0.0   
                         }
+    
+    left_controller = {'primaryButton': False, 
+                        'secondaryButton': False,
+                        'triggerButton': False,
+                        'triggerValue': 0.0,
+                        'gripButton': False,
+                        'joystickButton': False,
+                        'joystick_pos_x': 0.0, 'joystick_pos_y': 0.0,
+                        'controller_pos_x': 0.0, 'controller_pos_y': 0.0, 'controller_pos_z': 0.0,
+                        'controller_rot_w': 0.0, 'controller_rot_x': 0.0, 'controller_rot_y': 0.0, 'controller_rot_z': 0.0   
+                        }
 
     calibrate_arm_boundaries_state = 0
 
@@ -936,6 +1027,10 @@ if __name__ == '__main__':
     gripperButtonReleased = True
     gripperValue = 0.0
 
+    initButton_state = False
+    estopButton_state = False
+    clearfaultButton_state = False
+
     motionFinished = False
 
     # Autonomy
@@ -953,6 +1048,7 @@ if __name__ == '__main__':
     rospy.Subscriber('/pid/motion_finished', Bool, pid_motion_finished_callback)
     rospy.Subscriber('/chest_position', geom_msgs.Point, chest_position_callback)
     rospy.Subscriber("rightControllerInfo", ControllerInput, right_callback)
+    rospy.Subscriber("leftControllerInfo", ControllerInput, left_callback)
     rospy.Subscriber('/my_gen3/base_feedback', BaseCyclic_Feedback, ee_callback)
 
     # Service
@@ -963,6 +1059,8 @@ if __name__ == '__main__':
 
     gripper_command_srv = rospy.ServiceProxy('my_gen3/base/send_gripper_command', SendGripperCommand)
     stop_arm_srv = rospy.ServiceProxy('my_gen3/base/stop', Stop)
+    estop_arm_srv = rospy.ServiceProxy('my_gen3/base/apply_emergency_stop', ApplyEmergencyStop)
+    clearfaults_arm_srv = rospy.ServiceProxy('my_gen3/base/clear_faults', Base_ClearFaults)
 
     chest_homing_srv = rospy.ServiceProxy('z_chest_home', clearcore_srv.Homing)
     chest_stop_srv = rospy.ServiceProxy('z_chest_stop', clearcore_srv.Stop)
