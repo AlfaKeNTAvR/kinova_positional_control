@@ -911,6 +911,9 @@ def pick_place_autonomy_sm():
                 # BUG: does not publish 0
                 reachability = 0
 
+                # HACK: allows to print 0s, but blocks
+                rospy.sleep(1)
+
                 pp_sm_state = "manual"     
         
         elif gripperState == "close":
@@ -936,6 +939,8 @@ def pick_place_autonomy_sm():
                 # BUG: does not publish 0
                 reachability = 0
 
+                # HACK: allows to print 0s, but blocks
+                rospy.sleep(1)
 
                 pp_sm_state = "manual"               
 
