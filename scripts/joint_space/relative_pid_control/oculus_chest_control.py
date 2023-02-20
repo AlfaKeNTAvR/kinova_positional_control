@@ -575,6 +575,21 @@ def right_callback(data):
         isTracking = False
         isTracking_state = 0
 
+    # Publish calibration parameters
+    msg = Bool()
+    msg.data = isTracking
+    tracking_pub.publish(msg)
+
+    global reachability, pick_place
+    msg1 = Int32()
+    msg1.data = pick_place
+    pick_place_pub.publish(msg1)
+
+    msg2 = Int32()
+    msg2.data = reachability
+    reachability_pub.publish(msg2)
+
+
 
 # Left controller topic callback function
 def left_callback(data):
@@ -837,15 +852,16 @@ def pick_place_autonomy_sm():
     global pp_sm_state, gripperState, right_controller, relaxed_ik_boundary
     global shelf_grid, chest_pos, relaxed_ik_pos_gcs
     global isTracking, isTracking_state
+    global reachability, pick_place
 
     # NOTE: Greater than Max boundary because of left most, bottom position
     z_reach_min_bound = 0.27
     z_reach_max_bound = 0.15
 
-    intent_autonomy = -1
+    reachability = -1
     pick_place = -1
 
-    x_grasp = 0.53
+    x_pick = 0.53
     x_place = 0.54
 
     # Controlled manually, waiting for intent autonomy activation
@@ -856,8 +872,8 @@ def pick_place_autonomy_sm():
 
         pp_sm_state = "intent"
 
-        # Publish -1 when not autonomy and not intent
-        intent_autonomy = -1
+        # Publish -1 when not autonomy and not reachability intent
+        reachability = -1
         pick_place = -1
 
     # Activate intent autonomy
@@ -869,54 +885,59 @@ def pick_place_autonomy_sm():
         # Get row and column of the closest point of grid
         row, col = find_closest_point(y, z, shelf_grid)
 
+        # -1 no pnp
+        pick_place = -1
+
         if gripperState == "open":
             # Reachable goal
             if (
-                abs(shelf_grid[row, col][1] - chest_pos / 1000 - relaxed_ik_boundary['z_max']) > z_reach_max_bound and          # If traget is far from Z max
+                abs(shelf_grid[row, col][1] - chest_pos / 1000 - relaxed_ik_boundary['z_max']) > z_reach_max_bound and          # If target is far from Z max
                 abs(shelf_grid[row, col][1] - chest_pos / 1000 - relaxed_ik_boundary['z_min']) > z_reach_min_bound              # If target is far from Z min
-                ):                 
+                ):     
+
+                # Publish 1 if reachable
+                reachability = 1             
 
                 # Show intent       
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1]]), 1)
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'] + 0.05, shelf_grid[row, col][0], shelf_grid[row, col][1]]), 0.5)  
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1]]), 0.5)
 
-                pp_sm_state = "confirm" 
-
-                # Publish 1 if reachable
-                intent_autonomy = 1 
+                pp_sm_state = "confirm"             
 
             # Unreachable goal
             else:
-                pp_sm_state = "manual"     
-
                 # Publish 0 if unreachable
-                intent_autonomy = 0
+                # BUG: does not publish 0
+                reachability = 0
+
+                pp_sm_state = "manual"     
         
         elif gripperState == "close":
             # Reachable goal
             if (
-                abs(shelf_grid[row, col][1] + 0.025 - chest_pos / 1000 - relaxed_ik_boundary['z_max']) > z_reach_max_bound and   # If traget is far from Z max
+                abs(shelf_grid[row, col][1] + 0.025 - chest_pos / 1000 - relaxed_ik_boundary['z_max']) > z_reach_max_bound and   # If target is far from Z max
                 abs(shelf_grid[row, col][1] + 0.025 - chest_pos / 1000 - relaxed_ik_boundary['z_min']) > z_reach_min_bound       # If target is far from Z min
-                ):                         
+                ):       
+
+                # Publish 1 if reachable
+                reachability = 1                  
 
                 # Show intent
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 1) 
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'] + 0.05, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 0.5) 
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 0.5) 
 
-                pp_sm_state = "confirm"
-                
-                # Publish 1 if reachable
-                intent_autonomy = 1
+                pp_sm_state = "confirm"               
 
             # Unreachable goal
             else:
-
-                pp_sm_state = "manual" 
-                
                 # Publish 0 if unreachable
-                intent_autonomy = 0
+                # BUG: does not publish 0
+                reachability = 0
+
+
+                pp_sm_state = "manual"               
 
 
     # Confirm intent, activate pick and place autonomy
@@ -925,20 +946,24 @@ def pick_place_autonomy_sm():
         y = relaxed_ik_pos_gcs[1]
         z = relaxed_ik_pos_gcs[2] + chest_pos / 1000
 
+        # Get row and column of the closest point of grid
         row, col = find_closest_point(y, z, shelf_grid)
 
-        # Run grasping script
+        # -1 no reachability intent
+        reachability = -1
+
+        # Run picking script
         if gripperState == "open":
             
-            # 0 when grasping
+            # 0 when picking
             pick_place = 0
 
             trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1]]), 0.5) 
-            trajectory_sampler(np.array([x_grasp, shelf_grid[row, col][0], shelf_grid[row, col][1]]), 2) 
+            trajectory_sampler(np.array([x_pick, shelf_grid[row, col][0], shelf_grid[row, col][1]]), 2) 
             rospy.sleep(1)
             gripper_control(3, 0.7)
             rospy.sleep(1)
-            trajectory_sampler(np.array([x_grasp, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 1) 
+            trajectory_sampler(np.array([x_pick, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 1) 
             trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 1)  
 
             gripperState = "close"
@@ -973,15 +998,8 @@ def pick_place_autonomy_sm():
 
         # Publish -1 when not autonomy and not intent
         pick_place = -1
-        intent_autonomy = -1
+        reachability = -1
 
-    msg1 = Int32()
-    msg1.data = pick_place
-    grasp_place_pub.publish(msg1)
-
-    msg2 = Int32()
-    msg2.data = intent_autonomy
-    intent_autonomy_pub.publish(msg2)
 
 def initialization():
     global isInitialized
@@ -1021,10 +1039,16 @@ def initialization():
     chest_abspos_srv(220, 0.6)
 
     # Move Kinova to the middle position
-    trajectory_sampler(np.array([0, -0.1, 0.5 + 0.44]), 2) 
+    relaxed_ik_pub_target_gcs(np.array([0, -0.1, 0.5]), [1, 0, 0, 0])
 
     # Block until the motion is finished
-    rospy.sleep(3)
+    wait_motion_finished()
+
+    # # Move Kinova to the middle position
+    # trajectory_sampler(np.array([0, -0.1, 0.5 + 0.44]), 2) 
+
+    # # Block until the motion is finished
+    # rospy.sleep(3)
 
     # Set 100% velocity
     pid_vel_limit_srv(1.0)
@@ -1104,6 +1128,8 @@ if __name__ == '__main__':
     onLowerLimit = False
     GoalSet = False
     aut_bool = False
+    reachability = -1
+    pick_place = -1
 
     input_pos_gcs = np.array([0.0, 0.0, 0.0])
     kinova_pos_gcs = np.array([0.0, 0.0, 0.0])
@@ -1179,10 +1205,10 @@ if __name__ == '__main__':
     chest_vel_pub = rospy.Publisher('z_chest_vel', geom_msgs.Twist, queue_size=1)
     chest_abspos_pub = rospy.Publisher('/z_chest_pos', clearcore_msg.Position, queue_size=1)
     autonomy_prox_pub = rospy.Publisher('/autonomy_proximity', AutonomyInfo, queue_size=1)
-    intent_autonomy_pub = rospy.Publisher('/intent_autonomy', Int32, queue_size=1)
-    grasp_place_pub = rospy.Publisher('/grasp_place', Int32, queue_size=1)
+    reachability_pub = rospy.Publisher('/reachability', Int32, queue_size=1)
+    pick_place_pub = rospy.Publisher('/pick_place', Int32, queue_size=1)
     calibration_pub = rospy.Publisher('/calibration_param', Float32MultiArray, queue_size=1)
-    # calibration_min_pub = rospy.Publisher('/calibration_min', Float64, queue_size=1)
+    tracking_pub = rospy.Publisher('/tracking', Bool, queue_size=1)
 
     # Subscribing
     rospy.Subscriber('/pid/motion_finished', Bool, pid_motion_finished_callback)
