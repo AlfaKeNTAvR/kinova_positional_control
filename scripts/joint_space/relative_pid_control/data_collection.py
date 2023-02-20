@@ -11,17 +11,13 @@ import pandas as pd
 from datetime import datetime
 
 from ros_tcp_endpoint_msgs.msg import ControllerInput
-from relaxed_ik_ros1.msg import EEPoseGoals
 import geometry_msgs.msg as geom_msgs
 from std_msgs.msg import *
 from sensor_msgs.msg import JointState
 from kortex_driver.msg import *
 from kortex_driver.srv import *
 from kinova_positional_control.msg import AutonomyInfo
-import kinova_positional_control.srv as posctrl_srv
-from relaxed_ik_ros1.srv import activate_ik
-import gopher_ros_clearcore.msg as clearcore_msg
-import gopher_ros_clearcore.srv as clearcore_srv
+
 
 # Class for Kinova
 class Arm:
@@ -75,7 +71,7 @@ class Arm:
         Rz = T.rotation_matrix(math.radians(90.0), zaxis)
         R_gcs_to_kcs = T.concatenate_matrices(Rx, Ry, Rz)
 
-        ee_pos_wcs = data.data[0:3]
+        ee_pos_wcs = list(data.data[0:3])
 
         if self.FirstTime2:
             ee_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], ee_pos_wcs)
@@ -87,7 +83,7 @@ class Arm:
 
     def relaxedik_gcs_cb(self, data):
         
-        ee_pos_gcs = data.data[0:3]
+        ee_pos_gcs = list(data.data[0:3])
 
         if self.FirstTime3:
             
@@ -213,7 +209,10 @@ class Controller:
         self.FirstTime2 = True
         self.FirstTime3 = True
         self.FirstTime4 = True
+        self.FirstTime5 = True
 
+        self.prev_intent = -1
+        self.prev_pickplace = -1
         self.chestactivations = 0.0
         self.init_chest_pos = 0.0
         self.prev_pos = 220.0
@@ -235,7 +234,7 @@ class Controller:
         # Total travelled distance for Mode 0 
         self.tot_dist_chest_array = []
 
-        self.intent_array = []
+        self.reachability_array = []
         self.pickplace_array = []
 
         # Controller position
@@ -249,25 +248,6 @@ class Controller:
         # Controller coords
         input_pos_gcs = np.array([-1 * data.controller_pos_z, data.controller_pos_x, data.controller_pos_y])
 
-        # Tracking state and activations
-        gripButton = data.gripButton
-
-        if gripButton == True:
-
-            # 1 if GripButton is pressed
-            tracking_value = 1
-
-            if self.Starting_gripper:
-
-                self.trackingactivations += 1
-
-                self.Starting_gripper = False
-
-        else:
-            # 0 if GripButton is not pressed
-            tracking_value = 0            
-            self.Starting_gripper = True
-        
         if CHEST_CONTROL_MODE == 0:
             # Manual chest control activations
             if abs(data.joystick_pos_y) > 0.0:
@@ -302,27 +282,48 @@ class Controller:
         if self.FirstTime2:
             self.controller_array.append(input_pos_gcs)
 
+            self.FirstTime2 = False
+
+    def tracking_cb(self, data):
+        
+        # Tracking state and activations
+        if data.data:
+            # 1 if tracking
+            tracking_value = 1
+            
+            if self.Starting_gripper:
+
+                self.trackingactivations += 1
+
+                self.Starting_gripper = False
+
+        else:
+            # 0 if not tracking
+            tracking_value = 0
+            self.Starting_gripper = True
+
+        if self.FirstTime5:
             self.tracking_array.append(tracking_value)
             self.tracking_act_array.append(self.trackingactivations)
 
-            self.FirstTime2 = False
+            self.FirstTime5 = False
 
-    def grasp_place_cb(self, data):
+    def pick_place_cb(self, data):
         
         pickplace = data.data
 
         if self.FirstTime3:
+            print("PNP:", pickplace)
             self.pickplace_array.append(pickplace)
 
             self.FirstTime3 = False
 
-    def intent_cb(self, data):
-        #TOD0: Check intent
-        intent = data.data
-
+    def reachability_cb(self, data):
+        reachable = data.data
+        
         if self.FirstTime4:
-
-            self.intent_array.append(intent)
+            print("Reach:", reachable)
+            self.reachability_array.append(reachable)
 
             self.FirstTime4 = False
 
@@ -399,6 +400,8 @@ def store_data(CHEST_CONTROL_MODE, participant_index, trial, time_array):
               chest_total_distance, 
               chest_distance_per_act,
               controller.controller_array,
+              controller.reachability_array,
+              controller.pickplace_array,
               calibration_min,
               calibration_max]
     
@@ -410,31 +413,54 @@ def store_data(CHEST_CONTROL_MODE, participant_index, trial, time_array):
 
         if len(item) != maxLength:
             diff_length = abs(maxLength - len(item))
-            item.append(item[-1] * diff_length)
+            for i in range(0, diff_length):
+                item.append(item[-1])
 
-    df = pd.DataFrame({'date': arrays[0],
-                    'elapsed time': arrays[1],
+    # print(len(date_array))
+    # print(len(time_array))
+    # print(len(participant_array))
+    # print(len(control_mode_array))
+    # print(len(arm.ee_rikcs_array))
+    # print(len(arm.ee_gcs_array))
+    # print(len(arm.ee_wcs_array))
+    # print(len(arm.ee_array))
+    # print(len(arm.jointstate_array))
+    # print(len(arm.gripper_array))
+    # print(len(arm.faultstate_array))
+    # print(len(controller.tracking_array))
+    # print(len(controller.tracking_act_array))
+    # print(len(chest.chest_pos_array))
+    # print(len(chest_activations))
+    # print(len(chest_total_distance))
+    # print(len(chest_distance_per_act))
+    # print(len(controller.controller_array))
+    # print(len(calibration_min))
+
+    df = pd.DataFrame({
+                    'date': arrays[0],
+                    'elapsed_time': arrays[1],
                     'participant': arrays[2],
-                    'control mode': arrays[3],
-                    'n. trial': arrays[4],
-                    'ee ri kcs': arrays[5],
-                    'ee gcs': arrays[6],
-                    'ee wcs': arrays[7],
+                    'control_mode': arrays[3],
+                    'n_trial': arrays[4],
+                    'ee_rikcs': arrays[5],
+                    'ee_gcs': arrays[6],
+                    'ee_wcs': arrays[7],
                     'ee': arrays[8],
-                    'joint angles': arrays[9],
-                    'gripper state': arrays[10],
-                    'robot state': arrays[11],
+                    'joint_angles': arrays[9],
+                    'gripper_state': arrays[10],
+                    'robot_state': arrays[11],
                     'tracking': arrays[12],
-                    'n. tracking act': arrays[13],
-                    'chest position': arrays[14],
-                    'chest activations': arrays[15],
-                    'tot distance chest': arrays[16],
-                    'distance per activation': arrays[17],
-                    'controller position': arrays[18],
-                    'calibration min': arrays[19],
-                    'calibration max': arrays[20]})
-                    #'intent autonomy': intent_autonomy_array,
-                    #'pnp autonomy': pnp_autonomy_array
+                    'n_tracking_act': arrays[13],
+                    'chest_position': arrays[14],
+                    'chest_activations': arrays[15],
+                    'tot_distance_chest': arrays[16],
+                    'distance_per_activation': arrays[17],
+                    'controller_position': arrays[18],
+                    'reachability': arrays[19],
+                    'pick_and_place': arrays[20],
+                    'calibration_min': arrays[21],
+                    'calibration_max': arrays[22]
+                    })
 
     # Export to csv file 
     df.to_csv(path)
@@ -446,6 +472,7 @@ def reset_flags():
     controller.FirstTime2 = True
     controller.FirstTime3 = True
     controller.FirstTime4 = True
+    controller.FirstTime5 = True
 
     # Flags for Arm class
     arm.FirstTime1 = True
@@ -481,7 +508,7 @@ if __name__ == '__main__':
     arm = Arm()
     controller = Controller()
 
-    #Subscribe to topics
+    # Subscribe to topics
     # Joint angles and Gripper value
     rospy.Subscriber('/my_gen3/joint_states', JointState, arm.jointstate_cb)
     # EE position
@@ -493,10 +520,11 @@ if __name__ == '__main__':
     rospy.Subscriber('/chest_position', geom_msgs.Point, chest.position_cb)
     rospy.Subscriber('/autonomy_proximity', AutonomyInfo, chest.autonomy_state_cb)
     # Controller
-    rospy.Subscriber("rightControllerInfo", ControllerInput, controller.right_callback)
-    # Autonomy and intent
-    rospy.Subscriber('/intent_autonomy', Int32, controller.intent_cb)
-    rospy.Subscriber('/grasp_place', Int32, controller.grasp_place_cb)
+    rospy.Subscriber('rightControllerInfo', ControllerInput, controller.right_callback)
+    rospy.Subscriber('/tracking', Bool, controller.tracking_cb)
+    # Autonomy and reachability
+    rospy.Subscriber('/reachability_intent', Int32, controller.reachability_cb)
+    rospy.Subscriber('/pick_place', Int32, controller.pick_place_cb)
     # Arm calibration values for Mode 2
     rospy.Subscriber('/calibration_param', Float32MultiArray, controller.calibr_cb)
 
@@ -517,34 +545,6 @@ if __name__ == '__main__':
         print()
         print(elapsed_time)
 
-        
-        # print(len(time_array))
-        # print(len(arm.ee_rikcs_array))
-        # print(len(arm.ee_gcs_array))
-        # print(len(arm.ee_wcs_array))
-        # print(len(arm.ee_array))
-        # print(len(arm.jointstate_array))
-        # print(len(arm.gripper_array))
-        # print(len(arm.faultstate_array))
-        # print(len(controller.tracking_array))
-        # print(len(controller.tracking_act_array))
-        # print(len(chest.chest_pos_array))
-
-    
-        # print(len(arm.ee_rikcs_array))
-        # print(len(arm.ee_gcs_array))
-        # print(len(arm.ee_wcs_array))
-        # print(len(arm.ee_array))
-        # print(len(arm.jointstate_array))
-        # print(len(arm.gripper_array))
-        # print(len(arm.faultstate_array))
-        # print(len(controller.tracking_array))
-        # print(len(controller.tracking_act_array))
-        # print(len(chest.chest_pos_array))
-        # print(len(chest.chest_activations_array))
-        # print(len(chest.tot_dist_chest_array))
-        # print(len(chest.dist_per_activation_array))
-
         reset_flags()
         r.sleep()        
 
@@ -552,5 +552,4 @@ if __name__ == '__main__':
 
     print("Data saved successfully under", 'Data/' + participant_index + '/mode ' + str(CHEST_CONTROL_MODE) + ' - trial ' + str(trial) + '.csv')
 
-    #TODO: Add p'n'p and autonomy on and off
         
