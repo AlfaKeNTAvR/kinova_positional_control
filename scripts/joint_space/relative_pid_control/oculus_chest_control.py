@@ -125,8 +125,9 @@ def calibrate_arm_boundaries_sm():
 def chest_mapping():
     global right_controller, input_pos_gcs, chest_pos, goal_chest, operator_arm_boundary, relaxed_ik_pos_gcs
     global onTrackingStart, isInitialized
-    global onLowerLimit, onHigherLimit, GoalSet
+    global onLowerLimit, onHigherLimit, GoalSet, aut_activation_prox, aut_bool
     global isTracking
+
 
     if isInitialized:
         # Chest manual joystick control
@@ -155,8 +156,12 @@ def chest_mapping():
             if isTracking == True:
                 
                 # If end-effector is close to highest boundary of reachability
-                if ee_z_global > upper_limit and not GoalSet and chest_pos != 440:
+                if ee_z_global > upper_limit and not GoalSet and abs(chest_pos - 440) > 1:
                     
+                    # Autonomy activated increment
+                    aut_activation_prox += 1
+                    aut_bool = True
+
                     # Set higher limit and new goal flag to true 
                     onHigherLimit = True
                     GoalSet = True   
@@ -171,8 +176,11 @@ def chest_mapping():
 
 
                 # If end-effector is close to lowest boundary of reachability
-                elif ee_z_global < lower_limit and not GoalSet and chest_pos != 0:
+                elif ee_z_global < lower_limit and not GoalSet and chest_pos > 1:
                     
+                    #Autonomy activated increment
+                    aut_bool = True
+
                     # Set higher limit and new goal flag to true 
                     onLowerLimit = True
                     GoalSet = True       
@@ -194,6 +202,8 @@ def chest_mapping():
                         onLowerLimit = False
                         GoalSet = False
 
+                    aut_bool = False
+
 
             # Stop tracking if gripButton was released
             else:
@@ -206,10 +216,15 @@ def chest_mapping():
                 chest_vel_pub.publish(msg)
 
                 # Reset flags
+                aut_bool = False
                 onHigherLimit = False
                 onLowerLimit = False
                 GoalSet = False  
 
+            autonomy_prox = Bool()
+            autonomy_prox.data = aut_bool
+            autonomy_prox_pub.publish(autonomy_prox)
+            
 
         # Chest scaled motion mapping
         elif CHEST_CONTROL_MODE == 2:
@@ -248,7 +263,7 @@ def chest_mapping():
                 msg = geom_msgs.Twist()
                 msg.linear.z = 0.0
                 chest_vel_pub.publish(msg)
-
+                
 
 # # # Kinova # # #
 # Transition from Global CS to Kinova CS
@@ -379,6 +394,18 @@ def kinova_mapping():
         # Call pick and place autonomy state machine
         pick_place_autonomy_sm()
 
+        # Combine into a single array
+        msg = Float32MultiArray()
+        msg.data = relaxed_ik_pos_gcs.tolist() + [1, 0, 0, 0]
+
+        # Publish
+        relaxed_ik_target_gcs_pub.publish(msg)
+
+        # Add chest height to Z for WCS
+        relaxed_ik_pos_wcs = relaxed_ik_pos_gcs.copy()
+        relaxed_ik_pos_wcs[2] = relaxed_ik_pos_wcs[2] + chest_pos / 1000
+
+        relaxed_ik_pub_commanded_wcs(relaxed_ik_pos_wcs, [1, 0, 0, 0])
 
 # Publish target position and orientation in World Coordinate system (same as Global CS, but Z contains a chest height)
 def relaxed_ik_pub_target_wcs(target_position_wcs, target_orientation_wcs):
@@ -394,9 +421,6 @@ def relaxed_ik_pub_target_wcs(target_position_wcs, target_orientation_wcs):
 
     # TODO: orientation
     relaxed_ik_pub_target_rikcs(relaxed_ik_pos_rikcs, target_orientation_wcs)
-
-    # Publish commanded relaxed_ik in world coordinates
-    relaxed_ik_pub_commanded_wcs(target_position_wcs, target_orientation_wcs)
 
 
 # Publish last commanded target position and orientation in a World Coordinate System
@@ -456,12 +480,6 @@ def relaxed_ik_pub_target_gcs(target_position_gcs, target_orientation_gcs):
     # TODO: orientation
     relaxed_ik_pub_target_rikcs(relaxed_ik_pos_rikcs, target_orientation_gcs)
 
-    # Add chest height to Z for WCS
-    relaxed_ik_pos_wcs = relaxed_ik_pos_gcs.copy()
-    relaxed_ik_pos_wcs[2] = relaxed_ik_pos_wcs[2] + chest_pos / 1000
-
-    relaxed_ik_pub_commanded_wcs(relaxed_ik_pos_wcs, target_orientation_gcs)
-
 
 # Publish target position and orientation in relaxed IK Coordinate system (Kinova)
 def relaxed_ik_pub_target_rikcs(target_position, target_orientation):
@@ -520,6 +538,11 @@ def right_callback(data):
     right_controller['controller_rot_y'] = data.controller_rot_y
     right_controller['controller_rot_z'] = data.controller_rot_z
 
+    # Publish calibration parameters
+    msg = Float32MultiArray()
+    msg.data = [operator_arm_boundary['max'], operator_arm_boundary['min']]
+    calibration_pub.publish(msg)
+
     # Transition from Left-handed CS (Unity) to Right-handed CS (Global): swap y and z axis
     # Then swap x and new y (which was z) to have x facing forward
     # Negate new y (which is x) to make it align with a global coordinate system
@@ -536,6 +559,7 @@ def right_callback(data):
         # Activate a tracking mode
         isTracking = True
         isTracking_state = 2
+        if isInitialized: print("\nTracking is ON.\n")
 
     # Pressed
     elif isTracking_state == 2 and right_controller['gripButton'] == True:
@@ -548,6 +572,45 @@ def right_callback(data):
         # Deactivate a tracking mode
         isTracking = False
         isTracking_state = 0
+        if isInitialized: print("\nTracking is OFF.\n")
+
+    # Publish calibration parameters
+    msg = Bool()
+    msg.data = isTracking
+    tracking_pub.publish(msg)
+
+    # HACK 1
+    global reachability, pick_place
+    msg1 = Int32()
+    msg1.data = pick_place
+    pick_place_pub.publish(msg1)
+
+    msg2 = Int32()
+    msg2.data = reachability
+    reachability_pub.publish(msg2)
+
+    # HACK 2
+    global relaxed_ik_pos_gcs
+    # Combine into a single array
+    msg = Float32MultiArray()
+    msg.data = relaxed_ik_pos_gcs.tolist() + [1, 0, 0, 0]
+
+    # Publish
+    relaxed_ik_target_gcs_pub.publish(msg)
+
+    # Add chest height to Z for WCS
+    relaxed_ik_pos_wcs = relaxed_ik_pos_gcs.copy()
+    relaxed_ik_pos_wcs[2] = relaxed_ik_pos_wcs[2] + chest_pos / 1000
+
+    relaxed_ik_pub_commanded_wcs(relaxed_ik_pos_wcs, [1, 0, 0, 0])
+
+    # HACK 3
+    if CHEST_CONTROL_MODE == 1:
+        global aut_activation_prox, aut_bool
+
+        autonomy_prox = Bool()
+        autonomy_prox.data = aut_bool
+        autonomy_prox_pub.publish(autonomy_prox)
 
 
 # Left controller topic callback function
@@ -743,7 +806,7 @@ def ee_callback(data):
 
         # In global coordinate system
         kinova_pos_gcs = np.matmul(R_kcs_to_gcs[0:3,0:3], kinova_pos_kcs)
-  
+
         if onStartup['right_arm'] == True:
 
             # Calculate a transition from relaxedIK initial absolute postion (0, 0, 0) to KinovaFK on startup
@@ -756,6 +819,7 @@ def ee_callback(data):
 # Samples and executes trajectory based on the target goal in WCS and duration
 def trajectory_sampler(target_pos_wcs, duration):
     global relaxed_ik_pos_gcs, chest_pos
+    global pp_sm_state
 
     # Sampling and executing frequency
     loop_frequency = 100
@@ -810,12 +874,16 @@ def pick_place_autonomy_sm():
     global pp_sm_state, gripperState, right_controller, relaxed_ik_boundary
     global shelf_grid, chest_pos, relaxed_ik_pos_gcs
     global isTracking, isTracking_state
+    global reachability, pick_place
 
     # NOTE: Greater than Max boundary because of left most, bottom position
     z_reach_min_bound = 0.27
     z_reach_max_bound = 0.15
 
-    x_grasp = 0.53
+    reachability = -1
+    pick_place = -1
+
+    x_pick = 0.53
     x_place = 0.54
 
     # Controlled manually, waiting for intent autonomy activation
@@ -826,6 +894,9 @@ def pick_place_autonomy_sm():
 
         pp_sm_state = "intent"
 
+        # Publish -1 when not autonomy and not reachability intent
+        reachability = -1
+        pick_place = -1
 
     # Activate intent autonomy
     elif pp_sm_state == "intent" and right_controller['primaryButton'] == False:
@@ -836,44 +907,64 @@ def pick_place_autonomy_sm():
         # Get row and column of the closest point of grid
         row, col = find_closest_point(y, z, shelf_grid)
 
+        # -1 no pnp
+        pick_place = -1
+
         if gripperState == "open":
             # Reachable goal
             if (
-                abs(shelf_grid[row, col][1] - chest_pos / 1000 - relaxed_ik_boundary['z_max']) > z_reach_max_bound and          # If traget is far from Z max
+                abs(shelf_grid[row, col][1] - chest_pos / 1000 - relaxed_ik_boundary['z_max']) > z_reach_max_bound and          # If target is far from Z max
                 abs(shelf_grid[row, col][1] - chest_pos / 1000 - relaxed_ik_boundary['z_min']) > z_reach_min_bound              # If target is far from Z min
-                ):                 
+                ):     
+
+                # Publish 1 if reachable
+                reachability = 1             
 
                 # Show intent       
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1]]), 1)
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'] + 0.05, shelf_grid[row, col][0], shelf_grid[row, col][1]]), 0.5)  
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1]]), 0.5)
 
-                pp_sm_state = "confirm" 
+                pp_sm_state = "confirm"             
 
             # Unreachable goal
             else:
-                
-                pp_sm_state = "manual"        
-            
+                # Publish 0 if unreachable
+                # BUG: does not publish 0
+                reachability = 0
 
+                # HACK: allows to print 0s, but blocks
+                rospy.sleep(1)
+
+                pp_sm_state = "manual"     
+        
         elif gripperState == "close":
             # Reachable goal
             if (
-                abs(shelf_grid[row, col][1] + 0.025 - chest_pos / 1000 - relaxed_ik_boundary['z_max']) > z_reach_max_bound and   # If traget is far from Z max
+                abs(shelf_grid[row, col][1] + 0.025 - chest_pos / 1000 - relaxed_ik_boundary['z_max']) > z_reach_max_bound and   # If target is far from Z max
                 abs(shelf_grid[row, col][1] + 0.025 - chest_pos / 1000 - relaxed_ik_boundary['z_min']) > z_reach_min_bound       # If target is far from Z min
-                ):                         
+                ):       
+
+                # Publish 1 if reachable
+                reachability = 1                  
 
                 # Show intent
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 1) 
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'] + 0.05, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 0.5) 
                 trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 0.5) 
 
-                pp_sm_state = "confirm"
+                pp_sm_state = "confirm"               
 
             # Unreachable goal
             else:
+                # Publish 0 if unreachable
+                # BUG: does not publish 0
+                reachability = 0
 
-                pp_sm_state = "manual" 
+                # HACK: allows to print 0s, but blocks
+                rospy.sleep(1)
+
+                pp_sm_state = "manual"               
 
 
     # Confirm intent, activate pick and place autonomy
@@ -882,23 +973,33 @@ def pick_place_autonomy_sm():
         y = relaxed_ik_pos_gcs[1]
         z = relaxed_ik_pos_gcs[2] + chest_pos / 1000
 
+        # Get row and column of the closest point of grid
         row, col = find_closest_point(y, z, shelf_grid)
 
-        # Run grasping script
+        # -1 no reachability intent
+        reachability = -1
+
+        # Run picking script
         if gripperState == "open":
- 
+            
+            # 0 when picking
+            pick_place = 0
+
             trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1]]), 0.5) 
-            trajectory_sampler(np.array([x_grasp, shelf_grid[row, col][0], shelf_grid[row, col][1]]), 2) 
+            trajectory_sampler(np.array([x_pick, shelf_grid[row, col][0], shelf_grid[row, col][1]]), 2) 
             rospy.sleep(1)
             gripper_control(3, 0.7)
             rospy.sleep(1)
-            trajectory_sampler(np.array([x_grasp, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 1) 
+            trajectory_sampler(np.array([x_pick, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 1) 
             trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 1)  
 
             gripperState = "close"
         
         # Run placing script
         elif gripperState == "close":
+            
+            # Publish 1 when placing
+            pick_place = 1
 
             trajectory_sampler(np.array([relaxed_ik_boundary['x_max'], shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 0.5) 
             trajectory_sampler(np.array([x_place, shelf_grid[row, col][0], shelf_grid[row, col][1] + 0.025]), 2) 
@@ -916,12 +1017,15 @@ def pick_place_autonomy_sm():
      
         pp_sm_state = "manual"
 
-
     # Cancel autonomy, return control
     elif pp_sm_state == "confirm" and (isTracking == True or                                # If gripButton was pressed
         (CHEST_CONTROL_MODE == 0 and abs(right_controller['joystick_pos_y']) > 0.05)):      # OR if control mode is manual and joystick was moved
 
         pp_sm_state = "manual"
+
+        # Publish -1 when not autonomy and not intent
+        pick_place = -1
+        reachability = -1
 
 
 def initialization():
@@ -950,9 +1054,6 @@ def initialization():
 
     print("\nHoming has finished.\n") 
 
-    # Open the gripper
-    gripper_control(3, 0.0)
-
     # Calculate a transition between Global CS and Kinova CS
     calculate_gcs_kcs_trans()
 
@@ -962,13 +1063,28 @@ def initialization():
     chest_abspos_srv(220, 0.6)
 
     # Move Kinova to the middle position
-    trajectory_sampler(np.array([0, -0.1, 0.5 + 0.44]), 2) 
+    relaxed_ik_pub_target_gcs(np.array([0, -0.1, 0.5]), [1, 0, 0, 0])
 
     # Block until the motion is finished
-    rospy.sleep(3)
+    wait_motion_finished()
+
+    # # Move Kinova to the middle position
+    # trajectory_sampler(np.array([0, -0.1, 0.5 + 0.44]), 2) 
+
+    # # Block until the motion is finished
+    # rospy.sleep(3)
 
     # Set 100% velocity
     pid_vel_limit_srv(1.0)
+
+    # Chest scaled motion mapping
+    if CHEST_CONTROL_MODE == 2:
+        # Operator arm boundary calibration
+        while calibrate_arm_boundaries_sm() != True and not rospy.is_shutdown():
+            pass
+
+        # Controller to chest position calibration
+        calculate_controller_chest_diff()
 
     # Set the flag and finish initialization
     isInitialized = True
@@ -989,7 +1105,12 @@ def e_stop():
     isTracking = False
     isInitialized = False
 
-    # TODO: pause data collector
+    # Pause datarecoding
+    try:
+        resume_data_srv(False)
+
+    except Exception as e: 
+        print(e)
 
 
 # Roslaunch PID
@@ -1030,6 +1151,13 @@ def node_shutdown():
     pid_launch.shutdown()
     relaxed_ik_launch.shutdown()
 
+    # Pause datarecoding
+    try:
+        resume_data_srv(False)
+
+    except Exception as e: 
+        print(e)
+
     print("\nNode has shut down.")
     
 
@@ -1044,6 +1172,9 @@ if __name__ == '__main__':
     onHigherLimit = False
     onLowerLimit = False
     GoalSet = False
+    aut_bool = False
+    reachability = -1
+    pick_place = -1
 
     input_pos_gcs = np.array([0.0, 0.0, 0.0])
     kinova_pos_gcs = np.array([0.0, 0.0, 0.0])
@@ -1083,7 +1214,8 @@ if __name__ == '__main__':
     goal_chest = 440.0
     prev_z = 220.0
     oculus_chest_diff = 0.0 
-
+    aut_activation_prox = 0
+    
     # Flags
     isTracking = False
     isTracking_state = 0
@@ -1114,9 +1246,15 @@ if __name__ == '__main__':
     setpoint_pub = rospy.Publisher('/relaxed_ik/ee_pose_goals', EEPoseGoals, queue_size=1)
     angles_pub = rospy.Publisher('/relaxed_ik/joint_angle_solutions', JointAngles, queue_size=10)
     relaxed_ik_target_wcs_pub = rospy.Publisher('/relaxed_ik/position_wcs', Float32MultiArray, queue_size=1)
+    relaxed_ik_target_gcs_pub = rospy.Publisher('/relaxed_ik/position_gcs', Float32MultiArray, queue_size=1)
     chest_vel_pub = rospy.Publisher('z_chest_vel', geom_msgs.Twist, queue_size=1)
     chest_abspos_pub = rospy.Publisher('/z_chest_pos', clearcore_msg.Position, queue_size=1)
-    
+    autonomy_prox_pub = rospy.Publisher('/autonomy_proximity', Bool, queue_size=1)
+    reachability_pub = rospy.Publisher('/reachability', Int32, queue_size=1)
+    pick_place_pub = rospy.Publisher('/pick_place', Int32, queue_size=1)
+    calibration_pub = rospy.Publisher('/calibration_param', Float32MultiArray, queue_size=1)
+    tracking_pub = rospy.Publisher('/tracking', Bool, queue_size=1)
+
     # Subscribing
     rospy.Subscriber('/pid/motion_finished', Bool, pid_motion_finished_callback)
     rospy.Subscriber('/chest_position', geom_msgs.Point, chest_position_callback)
@@ -1140,20 +1278,16 @@ if __name__ == '__main__':
     chest_abspos_srv = rospy.ServiceProxy('z_chest_abspos', clearcore_srv.AbsolutePosition)
     chest_logger_srv = rospy.ServiceProxy('z_chest_logger', clearcore_srv.LoggerControl)
 
-    # Chest scaled motion mapping
-    if CHEST_CONTROL_MODE == 2:
-        # Operator arm boundary calibration
-        while calibrate_arm_boundaries_sm() != True and not rospy.is_shutdown():
-            pass
-
-        # Controller to chest position calibration
-        calculate_controller_chest_diff()
+    resume_data_srv = rospy.ServiceProxy('/data_collector/resume_data', posctrl_srv.resume_record)
 
     # Activate chest feedback
     chest_logger_srv(True)
 
     # Initialize the robot
     initialization() 
+
+    # Open the gripper
+    gripper_control(3, 0.0)
 
     # Main loop
     while not rospy.is_shutdown():

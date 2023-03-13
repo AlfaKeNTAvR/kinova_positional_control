@@ -1,0 +1,2 @@
+bool aut_on
+int32 aut_activations
