@@ -16,7 +16,7 @@ from std_msgs.msg import *
 from sensor_msgs.msg import JointState
 from kortex_driver.msg import *
 from kortex_driver.srv import *
-from kinova_positional_control.msg import AutonomyInfo
+import kinova_positional_control.srv as posctrl_srv
 
 
 # Class for Kinova
@@ -48,77 +48,89 @@ class Arm:
         self.faultstate_array = []
 
     def jointstate_cb(self, data):
+        global isStarted
 
-        joint_states = data.position[0:7]
+        if isStarted:
+            joint_states = list(data.position[0:7])
 
-        # If gripper is open: 0
-        if data.position[8] < 0.1 and data.position[8] > 0:
-            gripper_value = 0
-        # If gripper is closed: 1
-        else:
-            gripper_value = 1
+            # If gripper is open: 0
+            if data.position[8] < 0.1 and data.position[8] > 0:
+                gripper_value = 0
+            # If gripper is closed: 1
+            else:
+                gripper_value = 1
 
-        if self.FirstTime1:
-            self.gripper_array.append(gripper_value)
-            self.jointstate_array.append(joint_states)
+            if self.FirstTime1:
+                self.gripper_array.append(gripper_value)
+                self.jointstate_array.append(joint_states)
 
-            self.FirstTime1 = False
+                self.FirstTime1 = False
         
     def relaxedik_wcs_cb(self, data):
-        xaxis, yaxis, zaxis = (1, 0, 0), (0, 1, 0), (0, 0, 1)
-        Rx = T.rotation_matrix(math.radians(0.0), xaxis)
-        Ry = T.rotation_matrix(math.radians(-48.2), yaxis)
-        Rz = T.rotation_matrix(math.radians(90.0), zaxis)
-        R_gcs_to_kcs = T.concatenate_matrices(Rx, Ry, Rz)
+        global isStarted
 
-        ee_pos_wcs = list(data.data[0:3])
+        if isStarted:
+            xaxis, yaxis, zaxis = (1, 0, 0), (0, 1, 0), (0, 0, 1)
+            Rx = T.rotation_matrix(math.radians(0.0), xaxis)
+            Ry = T.rotation_matrix(math.radians(-48.2), yaxis)
+            Rz = T.rotation_matrix(math.radians(90.0), zaxis)
+            R_gcs_to_kcs = T.concatenate_matrices(Rx, Ry, Rz)
 
-        if self.FirstTime2:
-            ee_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], ee_pos_wcs)
+            ee_pos_wcs = list(data.data[0:3])
 
-            self.ee_rikcs_array.append(ee_pos_rikcs)
-            self.ee_wcs_array.append(ee_pos_wcs)
+            if self.FirstTime2:
 
-            self.FirstTime2 = False
+                ee_pos_rikcs = np.matmul(R_gcs_to_kcs[0:3,0:3], ee_pos_wcs)
+
+                self.ee_rikcs_array.append(np.array(ee_pos_rikcs))
+                self.ee_wcs_array.append(np.array(ee_pos_wcs))
+
+                self.FirstTime2 = False
 
     def relaxedik_gcs_cb(self, data):
+        global isStarted
+
+        if isStarted:
         
-        ee_pos_gcs = list(data.data[0:3])
+            ee_pos_gcs = list(data.data[0:3])
 
-        if self.FirstTime3:
-            
-            self.ee_gcs_array.append(ee_pos_gcs)
+            if self.FirstTime3:
+                
+                self.ee_gcs_array.append(np.array(ee_pos_gcs))
 
-            self.FirstTime3 = False
+                self.FirstTime3 = False
 
     def error_cb(self, data):
+        global isStarted
+
+        if isStarted:
         
-        self.kinova_pos_kcs = np.array([data.base.tool_pose_x, 
-                    data.base.tool_pose_y, 
-                    data.base.tool_pose_z])
+            self.kinova_pos_kcs = np.array([data.base.tool_pose_x, 
+                        data.base.tool_pose_y, 
+                        data.base.tool_pose_z])
 
-        error_joint1 = data.actuators[0].fault_bank_a
-        error_joint2 = data.actuators[1].fault_bank_a
-        error_joint3 = data.actuators[2].fault_bank_a
-        error_joint4 = data.actuators[3].fault_bank_a
-        error_joint5 = data.actuators[4].fault_bank_a
-        error_joint6 = data.actuators[5].fault_bank_a
-        error_joint7 = data.actuators[6].fault_bank_a
-        
-        if error_joint1 != 0 or error_joint2 != 0 or error_joint3 != 0 or error_joint4 != 0 or error_joint5 != 0 or error_joint6 != 0 or error_joint7 != 0:
-            # 1 if it's in a fault state
-            robot_state = 1
+            error_joint1 = data.actuators[0].fault_bank_a
+            error_joint2 = data.actuators[1].fault_bank_a
+            error_joint3 = data.actuators[2].fault_bank_a
+            error_joint4 = data.actuators[3].fault_bank_a
+            error_joint5 = data.actuators[4].fault_bank_a
+            error_joint6 = data.actuators[5].fault_bank_a
+            error_joint7 = data.actuators[6].fault_bank_a
+            
+            if error_joint1 != 0 or error_joint2 != 0 or error_joint3 != 0 or error_joint4 != 0 or error_joint5 != 0 or error_joint6 != 0 or error_joint7 != 0:
+                # 1 if it's in a fault state
+                robot_state = 1
 
-        else:
-            # 0 if it's not in a fault state
-            robot_state = 0
+            else:
+                # 0 if it's not in a fault state
+                robot_state = 0
 
-        if self.FirstTime5:
+            if self.FirstTime5:
 
-            self.ee_array.append(self.kinova_pos_kcs)
-            self.faultstate_array.append(robot_state)
+                self.ee_array.append(self.kinova_pos_kcs)
+                self.faultstate_array.append(robot_state)
 
-            self.FirstTime5 = False
+                self.FirstTime5 = False
 
 
 # Class for Chest
@@ -128,6 +140,7 @@ class Chest:
         self.FirstTime1 = True
         self.FirstTime2 = True
         self.FirstTime3 = True
+        self.StartingAutonomy = True
 
         self.pos = 220.0        # Initial chest position
         self.prev_pos = 220.0
@@ -135,6 +148,7 @@ class Chest:
         self.dis_per_activation_proximity = 0.0
         self.tot_trav_distance_scaling = 0.0
         self.tot_trav_distance_proximity = 0.0
+        self.aut_activation_prox = 0
 
         # Chest position
         self.chest_pos_array = []
@@ -149,55 +163,67 @@ class Chest:
         self.chest_activations_array = []
 
     def position_cb(self, data):
+        global isStarted
 
-        self.pos = data.z
+        if isStarted:
 
-        if self.FirstTime1:
-  
-            self.chest_pos_array.append(self.pos)
+            self.pos = data.z
 
-            self.FirstTime1 = False
+            if self.FirstTime1:
+    
+                self.chest_pos_array.append(self.pos)
 
-        if CHEST_CONTROL_MODE == 2:
-            if abs(self.pos - self.prev_pos) > 0.5:
-                self.tot_trav_distance_scaling += abs(self.pos - self.prev_pos)
+                self.FirstTime1 = False
 
-                self.prev_pos = self.pos
-
-            if self.FirstTime2:
-
-                self.tot_dist_chest_array.append(self.tot_trav_distance_scaling)
-
-                self.FirstTime2 = False
-
-    def autonomy_state_cb(self, data):
-
-        if CHEST_CONTROL_MODE == 1:
-            # Number of autonomy activations
-            self.aut_activation_prox = data.aut_activations
-
-            if data.aut_on == True:
-
-                # Calculate distance moved since aut activation
-                self.dis_per_activation_proximity = abs(self.pos - self.init_chest_pos)
-                
+            if CHEST_CONTROL_MODE == 2:
                 if abs(self.pos - self.prev_pos) > 0.5:
-                    self.tot_trav_distance_proximity += abs(self.pos - self.prev_pos)
+                    self.tot_trav_distance_scaling += abs(self.pos - self.prev_pos)
 
                     self.prev_pos = self.pos
 
-            else:
-                self.init_chest_pos = chest.pos
-                # if autonomy is not on, set distance per activation equal to 0
-                self.dis_per_activation_proximity = 0.0
+                if self.FirstTime2:
 
-            if self.FirstTime3:
-                print(self.dis_per_activation_proximity)
-                self.chest_activations_array.append(self.aut_activation_prox)
-                self.dist_per_activation_array.append(self.dis_per_activation_proximity)
-                self.tot_dist_chest_array.append(self.tot_trav_distance_proximity)
+                    self.tot_dist_chest_array.append(self.tot_trav_distance_scaling)
 
-                self.FirstTime3 = False
+                    self.FirstTime2 = False
+
+    def autonomy_state_cb(self, data):
+        global isStarted
+
+        if isStarted:
+
+            if CHEST_CONTROL_MODE == 1:
+                # Number of autonomy activations
+                # self.aut_activation_prox = data.aut_activations
+
+                if data.data == True:
+                    if self.StartingAutonomy:
+                        self.aut_activation_prox += 1
+                        self.StartingAutonomy = False
+
+                    # Calculate distance moved since aut activation
+                    self.dis_per_activation_proximity = abs(self.pos - self.init_chest_pos)
+                    
+                    if abs(self.pos - self.prev_pos) > 0.5:
+                        self.tot_trav_distance_proximity += abs(self.pos - self.prev_pos)
+
+                        self.prev_pos = self.pos
+
+                else:
+                    self.init_chest_pos = chest.pos
+                    # if autonomy is not on, set distance per activation equal to 0
+                    self.dis_per_activation_proximity = 0.0
+                    self.StartingAutonomy = True
+                    
+
+                if self.FirstTime3:
+                    # print(self.aut_activation_prox)
+                    # print(self.StartingAutonomy)
+                    self.chest_activations_array.append(self.aut_activation_prox)
+                    self.dist_per_activation_array.append(self.dis_per_activation_proximity)
+                    self.tot_dist_chest_array.append(self.tot_trav_distance_proximity)
+
+                    self.FirstTime3 = False
 
 
 # Class for controller       
@@ -244,94 +270,108 @@ class Controller:
         self.dist_per_activation_array = []
 
     def right_callback(self, data):
+        global isStarted
+
+        if isStarted:
         
-        # Controller coords
-        input_pos_gcs = np.array([-1 * data.controller_pos_z, data.controller_pos_x, data.controller_pos_y])
+            # Controller coords
+            input_pos_gcs = np.array([-1 * data.controller_pos_z, data.controller_pos_x, data.controller_pos_y])
 
-        if CHEST_CONTROL_MODE == 0:
-            # Manual chest control activations
-            if abs(data.joystick_pos_y) > 0.0:
-                if self.Starting:
+            if CHEST_CONTROL_MODE == 0:
+                # Manual chest control activations
+                if abs(data.joystick_pos_y) > 0.0:
+                    if self.Starting:
 
-                    self.chestactivations += 1
+                        self.chestactivations += 1
 
-                    self.Starting = False
+                        self.Starting = False
 
-                # Calculate distance moved since manual activation
-                self.distance_per_activation = abs(chest.pos - self.init_chest_pos)
+                    # Calculate distance moved since manual activation
+                    self.distance_per_activation = abs(chest.pos - self.init_chest_pos)
 
-                if abs(chest.pos - self.prev_pos) > 0.5:
-                    self.tot_trav_distance_manual += abs(chest.pos - self.prev_pos)
+                    if abs(chest.pos - self.prev_pos) > 0.5:
+                        self.tot_trav_distance_manual += abs(chest.pos - self.prev_pos)
 
-                    self.prev_pos = chest.pos
+                        self.prev_pos = chest.pos
 
-            if abs(data.joystick_pos_y) == 0.0:
-                self.init_chest_pos = chest.pos
+                if abs(data.joystick_pos_y) == 0.0:
+                    self.init_chest_pos = chest.pos
 
-                self.distance_per_activation = 0
-                self.Starting = True
+                    self.distance_per_activation = 0
+                    self.Starting = True
 
-            if self.FirstTime1:
-                
-                self.chest_activations_array.append(self.chestactivations)
-                self.dist_per_activation_array.append(self.distance_per_activation)
-                self.tot_dist_chest_array.append(self.tot_trav_distance_manual)
+                if self.FirstTime1:
+                    
+                    self.chest_activations_array.append(self.chestactivations)
+                    self.dist_per_activation_array.append(self.distance_per_activation)
+                    self.tot_dist_chest_array.append(self.tot_trav_distance_manual)
 
-                self.FirstTime1 = False
+                    self.FirstTime1 = False
 
-        if self.FirstTime2:
-            self.controller_array.append(input_pos_gcs)
+            if self.FirstTime2:
+                self.controller_array.append(np.array(input_pos_gcs))
 
-            self.FirstTime2 = False
+                self.FirstTime2 = False
 
     def tracking_cb(self, data):
+        global isStarted
+
+        if isStarted:
         
-        # Tracking state and activations
-        if data.data:
-            # 1 if tracking
-            tracking_value = 1
-            
-            if self.Starting_gripper:
+            # Tracking state and activations
+            if data.data:
+                # 1 if tracking
+                tracking_value = 1
+                
+                if self.Starting_gripper:
 
-                self.trackingactivations += 1
+                    self.trackingactivations += 1
 
-                self.Starting_gripper = False
+                    self.Starting_gripper = False
 
-        else:
-            # 0 if not tracking
-            tracking_value = 0
-            self.Starting_gripper = True
+            else:
+                # 0 if not tracking
+                tracking_value = 0
+                self.Starting_gripper = True
 
-        if self.FirstTime5:
-            self.tracking_array.append(tracking_value)
-            self.tracking_act_array.append(self.trackingactivations)
+            if self.FirstTime5:
+                self.tracking_array.append(tracking_value)
+                self.tracking_act_array.append(self.trackingactivations)
 
-            self.FirstTime5 = False
+                self.FirstTime5 = False
 
     def pick_place_cb(self, data):
-        
-        pickplace = data.data
+        global isStarted
 
-        if self.FirstTime3:
-            print("PNP:", pickplace)
-            self.pickplace_array.append(pickplace)
+        if isStarted:
+            pickplace = data.data
 
-            self.FirstTime3 = False
+            if self.FirstTime3:
+                # print("PNP:", pickplace)
+                self.pickplace_array.append(pickplace)
+
+                self.FirstTime3 = False
 
     def reachability_cb(self, data):
-        reachable = data.data
-        
-        if self.FirstTime4:
-            print("Reach:", reachable)
-            self.reachability_array.append(reachable)
+        global isStarted
 
-            self.FirstTime4 = False
+        if isStarted:
+            reachable = data.data
+            
+            if self.FirstTime4:
+                # print("Reach:", reachable)
+                self.reachability_array.append(reachable)
+
+                self.FirstTime4 = False
 
     def calibr_cb(self, data):
+        global isStarted
+
+        if isStarted:
             
-        self.calibration_max = round(data.data[0], 2)
-        
-        self.calibration_min = round(data.data[1], 2)
+            self.calibration_max = round(data.data[0], 2)
+            
+            self.calibration_min = round(data.data[1], 2)
 
 
 def FindMaxLength(lst):
@@ -340,19 +380,10 @@ def FindMaxLength(lst):
  
     return maxLength
 
-def store_data(CHEST_CONTROL_MODE, participant_index, trial, time_array):
-
-    root = os.path.abspath('src/kinova_positional_control/Data')
+def store_data(path_to_csv, CHEST_CONTROL_MODE, participant_index, trial, time_array):
+    
     file_type = ".csv"
 
-    if (not os.path.exists(root)):
-        os.mkdir(root)
-
-    if (not os.path.exists(root + '/' + participant_index)):
-        os.mkdir(root + '/' + participant_index)
-
-    path = root + '/' + participant_index + '/mode ' + str(CHEST_CONTROL_MODE) + ' - trial ' + str(trial) + file_type
-    
     participant_array = [participant_index] * len(time_array)
     control_mode_array = [CHEST_CONTROL_MODE] * len(time_array)
     trial_array = [trial] * len(time_array)
@@ -414,27 +445,7 @@ def store_data(CHEST_CONTROL_MODE, participant_index, trial, time_array):
         if len(item) != maxLength:
             diff_length = abs(maxLength - len(item))
             for i in range(0, diff_length):
-                item.append(item[-1])
-
-    # print(len(date_array))
-    # print(len(time_array))
-    # print(len(participant_array))
-    # print(len(control_mode_array))
-    # print(len(arm.ee_rikcs_array))
-    # print(len(arm.ee_gcs_array))
-    # print(len(arm.ee_wcs_array))
-    # print(len(arm.ee_array))
-    # print(len(arm.jointstate_array))
-    # print(len(arm.gripper_array))
-    # print(len(arm.faultstate_array))
-    # print(len(controller.tracking_array))
-    # print(len(controller.tracking_act_array))
-    # print(len(chest.chest_pos_array))
-    # print(len(chest_activations))
-    # print(len(chest_total_distance))
-    # print(len(chest_distance_per_act))
-    # print(len(controller.controller_array))
-    # print(len(calibration_min))
+                item.append('N/A')
 
     df = pd.DataFrame({
                     'date': arrays[0],
@@ -462,8 +473,19 @@ def store_data(CHEST_CONTROL_MODE, participant_index, trial, time_array):
                     'calibration_max': arrays[22]
                     })
 
+    if (os.path.exists(path_to_csv + file_type)):
+        i = 1
+
+        while (os.path.exists(path_to_csv + '(' + str(i) + ')' + file_type)):
+            i = i + 1
+
+        path_to_csv = path_to_csv + '(' + str(i) + ')'
+
+
     # Export to csv file 
-    df.to_csv(path)
+    df.to_csv(path_to_csv + file_type)
+    
+    print("Data saved successfully under", participant_path + '/' + file_name + file_type)
 
 def reset_flags():
 
@@ -486,11 +508,45 @@ def reset_flags():
     chest.FirstTime2 = True
     chest.FirstTime3 = True
 
+
+# Resume data recording service handler
+def resume_record_handler(req):
+    global isStarted, pause_message
+
+    # Resume data recording
+    if req.request == True:
+        print("\nData collector is resumed.\n")
+        isStarted = True
+
+        # Resume videorecording
+        resume_video_srv(True)
+
+    # Pause data recording
+    else:
+        print("\nData collector is paused.\n")
+        isStarted = False
+        pause_message = True
+
+        # Pause videorecording
+        resume_video_srv(False)
+
+    return True
+
+
+# This function is called when the node is shutting down
+def node_shutdown():
+    print("\nNode is shutting down...")
+
+    # Pause videorecording
+    resume_video_srv(False)
+
+    print("\nNode has shut down.")
+
 if __name__ == '__main__':
     
-
     # Initialize the node
-    rospy.init_node("data_collection", anonymous=True)
+    rospy.init_node("data_collector", anonymous=True)
+    rospy.on_shutdown(node_shutdown)
 
     parser = argparse.ArgumentParser(description='Process some integers.')
     parser.add_argument('-p', '--participant', action='store', default=20, help='participant index (starting from 0)')
@@ -498,6 +554,10 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--trial', action='store', default=0, help='1 - first trial, 2 - second trial')
 
     args = vars(parser.parse_args())
+
+    # Variables
+    isStarted = False
+    pause_message = True
 
     # 0 - manual, 1 - proximity, 2 - scaling
     CHEST_CONTROL_MODE = int(args['mode'])
@@ -518,38 +578,89 @@ if __name__ == '__main__':
     rospy.Subscriber('/my_gen3/base_feedback', BaseCyclic_Feedback, arm.error_cb)
     # Chest position
     rospy.Subscriber('/chest_position', geom_msgs.Point, chest.position_cb)
-    rospy.Subscriber('/autonomy_proximity', AutonomyInfo, chest.autonomy_state_cb)
+    rospy.Subscriber('/autonomy_proximity', Bool, chest.autonomy_state_cb)
     # Controller
     rospy.Subscriber('rightControllerInfo', ControllerInput, controller.right_callback)
     rospy.Subscriber('/tracking', Bool, controller.tracking_cb)
     # Autonomy and reachability
-    rospy.Subscriber('/reachability_intent', Int32, controller.reachability_cb)
+    rospy.Subscriber('/reachability', Int32, controller.reachability_cb)
     rospy.Subscriber('/pick_place', Int32, controller.pick_place_cb)
+
     # Arm calibration values for Mode 2
     rospy.Subscriber('/calibration_param', Float32MultiArray, controller.calibr_cb)
+
+    # Server
+    rospy.Service('/data_collector/resume_data', posctrl_srv.resume_record, resume_record_handler)  
+
+    # Service
+    init_video_srv = rospy.ServiceProxy('/video_recorder/init_video', posctrl_srv.init_record)
+    resume_video_srv = rospy.ServiceProxy('/video_recorder/resume_video', posctrl_srv.resume_record)
+    capture_image_srv = rospy.ServiceProxy('/video_recorder/capture_image', posctrl_srv.capture_image)
 
     time_array = []
     date_array = []
 
-    start = time.time()
+    elapsed_time = 0.0
+
     r = rospy.Rate(2)
-    
+
+    # Create folders to store data
+    root = os.path.abspath('/home/fetch/catkin_workspaces/pilot_study')
+    file_name = 'part_' + str(participant_index) + '_mode_' + str(CHEST_CONTROL_MODE) + '_trial_' + str(trial)
+
+    if (not os.path.exists(root)):
+        os.mkdir(root)
+
+    # Create folder with participant index
+    participant_path = root + '/' + str(participant_index)
+    if (not os.path.exists(participant_path)):
+        os.mkdir(participant_path)
+
+    # Create folder for Images 
+    images_path = (root + '/' + str(participant_index) + '/Images')
+    if (not os.path.exists(images_path)):
+        os.mkdir(images_path)
+
+    # Create folder for mode (.../Images/mode_x)
+    images_mode_path = (images_path + '/mode_' + str(CHEST_CONTROL_MODE))
+    if (not os.path.exists(images_mode_path)):
+        os.mkdir(images_mode_path) 
+
+    # Create folder for trial (.../Images/mode_x/trial_y)
+    images_trial_path = (images_mode_path + '/trial_' + str(trial))
+    if (not os.path.exists(images_trial_path)):
+        os.mkdir(images_trial_path) 
+
+    path_to_csv = participant_path + '/' + file_name
+
+    # Initialize video recording
+    print("\nVideo recorder is initialized under " + participant_path + '/' + file_name + '.avi\n')
+    init_video_srv(True, participant_path + '/' + file_name + '.avi')
+
+
     # Main loop
     while not rospy.is_shutdown():
+        if pause_message == True:
+                
+            print("\nData collector is waiting for the resume command from the terminal...\n")
+            pause_message = False
 
-        elapsed_time = round(time.time() - start, 2)
-        time_array.append(elapsed_time)
+        if isStarted == True:
 
-        date_array.append(datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
+            # Increase elapsed time
+            elapsed_time = elapsed_time + 0.5
+            time_array.append(elapsed_time)
+            print("\nElapsed time:", elapsed_time, "\n")
 
-        print()
-        print(elapsed_time)
+            date_array.append(datetime.today().strftime('%Y-%m-%d %H:%M:%S'))
 
-        reset_flags()
-        r.sleep()        
+            # TODO: image name try
+            try:
+                capture_image_srv(filename = images_trial_path + '/' + str(elapsed_time) + '.png')
+            except Exception as e: 
+                print(e)
 
-    store_data(CHEST_CONTROL_MODE, participant_index, trial, time_array)
+            reset_flags()
+            r.sleep()   
 
-    print("Data saved successfully under", 'Data/' + participant_index + '/mode ' + str(CHEST_CONTROL_MODE) + ' - trial ' + str(trial) + '.csv')
-
-        
+    store_data(path_to_csv, CHEST_CONTROL_MODE, participant_index, trial, time_array)

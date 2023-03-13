@@ -13,7 +13,6 @@ import geometry_msgs.msg as geom_msgs
 from std_msgs.msg import *
 from kortex_driver.msg import *
 from kortex_driver.srv import *
-from kinova_positional_control.msg import AutonomyInfo
 import kinova_positional_control.srv as posctrl_srv
 from relaxed_ik_ros1.srv import activate_ik
 import gopher_ros_clearcore.msg as clearcore_msg
@@ -157,9 +156,9 @@ def chest_mapping():
             if isTracking == True:
                 
                 # If end-effector is close to highest boundary of reachability
-                if ee_z_global > upper_limit and not GoalSet and chest_pos != 440:
+                if ee_z_global > upper_limit and not GoalSet and abs(chest_pos - 440) > 1:
                     
-                    #Autonomy activated increment
+                    # Autonomy activated increment
                     aut_activation_prox += 1
                     aut_bool = True
 
@@ -177,10 +176,9 @@ def chest_mapping():
 
 
                 # If end-effector is close to lowest boundary of reachability
-                elif ee_z_global < lower_limit and not GoalSet and chest_pos != 0:
+                elif ee_z_global < lower_limit and not GoalSet and chest_pos > 1:
                     
                     #Autonomy activated increment
-                    aut_activation_prox += 1
                     aut_bool = True
 
                     # Set higher limit and new goal flag to true 
@@ -223,9 +221,8 @@ def chest_mapping():
                 onLowerLimit = False
                 GoalSet = False  
 
-            autonomy_prox = AutonomyInfo()
-            autonomy_prox.aut_on = aut_bool
-            autonomy_prox.aut_activations = aut_activation_prox
+            autonomy_prox = Bool()
+            autonomy_prox.data = aut_bool
             autonomy_prox_pub.publish(autonomy_prox)
             
 
@@ -562,6 +559,7 @@ def right_callback(data):
         # Activate a tracking mode
         isTracking = True
         isTracking_state = 2
+        if isInitialized: print("\nTracking is ON.\n")
 
     # Pressed
     elif isTracking_state == 2 and right_controller['gripButton'] == True:
@@ -574,12 +572,14 @@ def right_callback(data):
         # Deactivate a tracking mode
         isTracking = False
         isTracking_state = 0
+        if isInitialized: print("\nTracking is OFF.\n")
 
     # Publish calibration parameters
     msg = Bool()
     msg.data = isTracking
     tracking_pub.publish(msg)
 
+    # HACK 1
     global reachability, pick_place
     msg1 = Int32()
     msg1.data = pick_place
@@ -589,6 +589,28 @@ def right_callback(data):
     msg2.data = reachability
     reachability_pub.publish(msg2)
 
+    # HACK 2
+    global relaxed_ik_pos_gcs
+    # Combine into a single array
+    msg = Float32MultiArray()
+    msg.data = relaxed_ik_pos_gcs.tolist() + [1, 0, 0, 0]
+
+    # Publish
+    relaxed_ik_target_gcs_pub.publish(msg)
+
+    # Add chest height to Z for WCS
+    relaxed_ik_pos_wcs = relaxed_ik_pos_gcs.copy()
+    relaxed_ik_pos_wcs[2] = relaxed_ik_pos_wcs[2] + chest_pos / 1000
+
+    relaxed_ik_pub_commanded_wcs(relaxed_ik_pos_wcs, [1, 0, 0, 0])
+
+    # HACK 3
+    if CHEST_CONTROL_MODE == 1:
+        global aut_activation_prox, aut_bool
+
+        autonomy_prox = Bool()
+        autonomy_prox.data = aut_bool
+        autonomy_prox_pub.publish(autonomy_prox)
 
 
 # Left controller topic callback function
@@ -1032,9 +1054,6 @@ def initialization():
 
     print("\nHoming has finished.\n") 
 
-    # Open the gripper
-    gripper_control(3, 0.0)
-
     # Calculate a transition between Global CS and Kinova CS
     calculate_gcs_kcs_trans()
 
@@ -1058,6 +1077,15 @@ def initialization():
     # Set 100% velocity
     pid_vel_limit_srv(1.0)
 
+    # Chest scaled motion mapping
+    if CHEST_CONTROL_MODE == 2:
+        # Operator arm boundary calibration
+        while calibrate_arm_boundaries_sm() != True and not rospy.is_shutdown():
+            pass
+
+        # Controller to chest position calibration
+        calculate_controller_chest_diff()
+
     # Set the flag and finish initialization
     isInitialized = True
 
@@ -1077,7 +1105,12 @@ def e_stop():
     isTracking = False
     isInitialized = False
 
-    # TODO: pause data collector
+    # Pause datarecoding
+    try:
+        resume_data_srv(False)
+
+    except Exception as e: 
+        print(e)
 
 
 # Roslaunch PID
@@ -1117,6 +1150,13 @@ def node_shutdown():
     # Shutdown PID and relaxed IK nodes
     pid_launch.shutdown()
     relaxed_ik_launch.shutdown()
+
+    # Pause datarecoding
+    try:
+        resume_data_srv(False)
+
+    except Exception as e: 
+        print(e)
 
     print("\nNode has shut down.")
     
@@ -1209,7 +1249,7 @@ if __name__ == '__main__':
     relaxed_ik_target_gcs_pub = rospy.Publisher('/relaxed_ik/position_gcs', Float32MultiArray, queue_size=1)
     chest_vel_pub = rospy.Publisher('z_chest_vel', geom_msgs.Twist, queue_size=1)
     chest_abspos_pub = rospy.Publisher('/z_chest_pos', clearcore_msg.Position, queue_size=1)
-    autonomy_prox_pub = rospy.Publisher('/autonomy_proximity', AutonomyInfo, queue_size=1)
+    autonomy_prox_pub = rospy.Publisher('/autonomy_proximity', Bool, queue_size=1)
     reachability_pub = rospy.Publisher('/reachability', Int32, queue_size=1)
     pick_place_pub = rospy.Publisher('/pick_place', Int32, queue_size=1)
     calibration_pub = rospy.Publisher('/calibration_param', Float32MultiArray, queue_size=1)
@@ -1238,20 +1278,16 @@ if __name__ == '__main__':
     chest_abspos_srv = rospy.ServiceProxy('z_chest_abspos', clearcore_srv.AbsolutePosition)
     chest_logger_srv = rospy.ServiceProxy('z_chest_logger', clearcore_srv.LoggerControl)
 
-    # Chest scaled motion mapping
-    if CHEST_CONTROL_MODE == 2:
-        # Operator arm boundary calibration
-        while calibrate_arm_boundaries_sm() != True and not rospy.is_shutdown():
-            pass
-
-        # Controller to chest position calibration
-        calculate_controller_chest_diff()
+    resume_data_srv = rospy.ServiceProxy('/data_collector/resume_data', posctrl_srv.resume_record)
 
     # Activate chest feedback
     chest_logger_srv(True)
 
     # Initialize the robot
     initialization() 
+
+    # Open the gripper
+    gripper_control(3, 0.0)
 
     # Main loop
     while not rospy.is_shutdown():
