@@ -49,19 +49,14 @@ find_package(catkin REQUIRED COMPONENTS
 ##   * add every package in MSG_DEP_SET to generate_messages(DEPENDENCIES ...)
 
 # Generate messages in the 'msg' folder
-add_message_files(
-  FILES
-  AutonomyInfo.msg
-)
+# add_message_files(
+#   FILES
+# )
 
 ## Generate services in the 'srv' folder
 add_service_files(
   FILES
-  pid_setpoint.srv
-  pid_vel_limit.srv
-  init_record.srv
-  resume_record.srv
-  capture_image.srv
+  PidVelocityLimit.srv
 )
 
 ## Generate actions in the 'action' folder
