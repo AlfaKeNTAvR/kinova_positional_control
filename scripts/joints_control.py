@@ -7,15 +7,15 @@ import rospy
 import math
 
 from std_msgs.msg import (Float64, Bool)
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import (JointState)
 
 from kortex_driver.msg import (
     Base_JointSpeeds,
     JointSpeed,
     JointAngles,
 )
-from kortex_driver.srv import Stop
-from kinova_positional_control.srv import PidVelocityLimit
+from kortex_driver.srv import (Stop)
+from kinova_positional_control.srv import (PidVelocityLimit)
 
 
 class KinovaJointsControl:
@@ -33,26 +33,28 @@ class KinovaJointsControl:
         
         """
 
-        # Public constants
+        # Public constants:
         self.ROBOT_NAME = name
         self.MAX_SPEEDS = max_speeds  # Rad/s
         self.CONTINOUS_JOINTS_INDICES = continous_joints_indices
         self.JOINTS_NUMBER = 7
 
-        # Private constants
+        # Private constants:
 
-        # Public variables
+        # Public variables:
         self.is_initialized = False
         self.velocity_fraction_limit = 1.0
         self.motion_finished_threshold = 0.01
 
-        # Private variables
+        # Private variables:
         # Absolute joint positions at the moment of setting a new goal. Relative
         # current joint positions are relative to these positions
         self.__start_absolute_positions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
         # Absolute current (feedback) joint positions.
         self.__current_absolute_positions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+        self.__goal_absolute_positions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
         # These velocities are the output of PIDs, which will be sent to Kinova
         # joint velocity topic.
@@ -61,20 +63,20 @@ class KinovaJointsControl:
         rospy.init_node(f'{self.ROBOT_NAME}_joints_control', anonymous=True)
         rospy.on_shutdown(self.__node_shutdown)
 
-        # Service provider
+        # Service provider:
         rospy.Service(
             'pid_vel_limit',
             PidVelocityLimit,
             self.__pid_velocity_limit_handler,
         )
 
-        # Service subscriber
+        # Service subscriber:
         self.__stop_arm_srv = rospy.ServiceProxy(
             'my_gen3/base/stop',
             Stop,
         )
 
-        # Topic publisher
+        # Topic publisher:
         self.__joint_velocity = rospy.Publisher(
             f'{self.ROBOT_NAME}/in/joint_velocity',
             Base_JointSpeeds,
@@ -159,7 +161,7 @@ class KinovaJointsControl:
             queue_size=1,
         )
 
-        # Topic subscriber
+        # Topic subscriber:
         rospy.Subscriber(
             f'{self.ROBOT_NAME}/base_feedback/joint_state',
             JointState,
@@ -215,7 +217,8 @@ class KinovaJointsControl:
 
         # Update from zero to the current arm position on initialization.
         if not self.is_initialized:
-            self.__start_absolute_positions = msg.position
+            self.__start_absolute_positions = list(msg.position)
+            self.__goal_absolute_positions = list(msg.position)
             self.is_initialized = True
 
             print('\nKinova joints control is ready.')
@@ -223,8 +226,6 @@ class KinovaJointsControl:
             return
 
         self.__current_absolute_positions = msg.position
-
-        self.__relative_feedback()
 
     def __relative_feedback(self):
         """
@@ -239,8 +240,8 @@ class KinovaJointsControl:
             if joint_index not in self.CONTINOUS_JOINTS_INDICES:
 
                 current_relative_positions[joint_index] = (
-                    self.__current_absolute_positions[joint_index] -
-                    self.__start_absolute_positions[joint_index]
+                    self.__current_absolute_positions[joint_index]
+                    - self.__start_absolute_positions[joint_index]
                 )
 
                 continue
@@ -271,16 +272,12 @@ class KinovaJointsControl:
         
         """
 
-        goal_absolute_positions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-
         for joint_index in range(self.JOINTS_NUMBER):
-            goal_absolute_positions[joint_index] = (
+            self.__goal_absolute_positions[joint_index] = (
                 msg.joint_angles[joint_index].value
             )
 
-        self.__relative_setpoint(goal_absolute_positions)
-
-    def __relative_setpoint(self, goal_absolute_positions):
+    def __relative_setpoint(self):
         """
         Calculates geodesic (shortest) angular distance and sets the goal
         positions relative to current positions.
@@ -295,8 +292,8 @@ class KinovaJointsControl:
         for joint_index in range(self.JOINTS_NUMBER):
             if joint_index not in self.CONTINOUS_JOINTS_INDICES:
                 goal_relative_positions[joint_index] = (
-                    goal_absolute_positions[joint_index] -
-                    self.__current_absolute_positions[joint_index]
+                    self.__goal_absolute_positions[joint_index]
+                    - self.__current_absolute_positions[joint_index]
                 )
 
                 continue
@@ -305,7 +302,7 @@ class KinovaJointsControl:
             # using geodesic distance.
             goal_relative_positions[joint_index] = (
                 self.geodesic_distance(
-                    goal_absolute_positions[joint_index],
+                    self.__goal_absolute_positions[joint_index],
                     self.__current_absolute_positions[joint_index]
                 )
             )
@@ -368,20 +365,19 @@ class KinovaJointsControl:
         """
 
         # Block callback function until all components are initialized.
-        if self.is_initialized:
+        if not self.is_initialized:
+            return False
 
-            if req.data > 1.0:
-                self.velocity_fraction_limit = 1.0
+        if req.data > 1.0:
+            self.velocity_fraction_limit = 1.0
 
-            elif req.data < 0.1:
-                self.velocity_fraction_limit = 0.1
+        elif req.data < 0.1:
+            self.velocity_fraction_limit = 0.1
 
-            else:
-                self.velocity_fraction_limit = req.data
+        else:
+            self.velocity_fraction_limit = req.data
 
-            return True
-
-        return False
+        return True
 
     def geodesic_distance(self, position1, position2):
         """
@@ -429,44 +425,56 @@ class KinovaJointsControl:
         
         """
 
-        # Block function until all components are initialized.
-        if self.is_initialized:
+        # Form a velocity message.
+        velocity_message = Base_JointSpeeds()
+        velocities = []
 
-            # Form a velocity message.
-            velocity_message = Base_JointSpeeds()
-            velocities = []
+        for joint_index in range(self.JOINTS_NUMBER):
+            joint_velocity = JointSpeed()
+            joint_velocity.joint_identifier = joint_index
 
-            for joint_index in range(self.JOINTS_NUMBER):
-                joint_velocity = JointSpeed()
-                joint_velocity.joint_identifier = joint_index
+            # Limit the output velocity.
+            if (
+                abs(self.__goal_velocities[joint_index]) >
+                self.MAX_SPEEDS[joint_index] * self.velocity_fraction_limit
+            ):
 
-                # Limit the output velocity.
-                if (
-                    abs(self.__goal_velocities[joint_index]) >
-                    self.MAX_SPEEDS[joint_index] * self.velocity_fraction_limit
-                ):
+                if self.__goal_velocities[joint_index] >= 0:
+                    self.__goal_velocities[joint_index] = (
+                        self.MAX_SPEEDS[joint_index]
+                        * self.velocity_fraction_limit
+                    )
 
-                    if self.__goal_velocities[joint_index] >= 0:
-                        self.__goal_velocities[joint_index] = (
-                            self.MAX_SPEEDS[joint_index] *
-                            self.velocity_fraction_limit
-                        )
+                else:
+                    self.__goal_velocities[joint_index] = (
+                        -1 * self.MAX_SPEEDS[joint_index]
+                        * self.velocity_fraction_limit
+                    )
 
-                    else:
-                        self.__goal_velocities[joint_index] = (
-                            -1 * self.MAX_SPEEDS[joint_index] *
-                            self.velocity_fraction_limit
-                        )
+            joint_velocity.value = self.__goal_velocities[joint_index]
+            joint_velocity.duration = 0  # Or 0.000333s
+            velocities.append(joint_velocity)
 
-                joint_velocity.value = self.__goal_velocities[joint_index]
-                joint_velocity.duration = 0  # Or 0.000333s
-                velocities.append(joint_velocity)
+        velocity_message.joint_speeds = velocities
+        velocity_message.duration = 0
 
-            velocity_message.joint_speeds = velocities
-            velocity_message.duration = 0
+        # Publish a velocity message.
+        self.__joint_velocity.publish(velocity_message)
 
-            # Publish a velocity message.
-            self.__joint_velocity.publish(velocity_message)
+    def main_loop(self):
+        """
+        
+        """
+
+        if not self.is_initialized:
+            return
+
+        # Recalculate absolute feedback and setpoint into relative coordinates.
+        self.__relative_feedback()
+        self.__relative_setpoint()
+
+        self.publish_joint_motion_finished()
+        self.publish_goal_velocities()
 
     def __node_shutdown(self):
         """
@@ -486,9 +494,10 @@ def main():
 
     right_arm = KinovaJointsControl()
 
+    print('\nWaiting for Kinova feedback...\n')
+
     while not rospy.is_shutdown():
-        right_arm.publish_joint_motion_finished()
-        right_arm.publish_goal_velocities()
+        right_arm.main_loop()
 
 
 if __name__ == '__main__':
