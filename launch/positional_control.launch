@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<launch>=
+    <include file="$(find kinova_positional_control)/launch/joints_control.launch"/>
+    <include file="$(find relaxed_ik_ros1)/launch/relaxed_ik.launch"/>
+
+    <node pkg="kinova_positional_control" type="positional_control.py" name="kinova_positional_control" output="screen"/>
+</launch>
