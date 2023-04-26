@@ -4,4 +4,5 @@
     <include file="$(find relaxed_ik_ros1)/launch/relaxed_ik.launch"/>
 
     <node pkg="kinova_positional_control" type="positional_control.py" name="kinova_positional_control" output="screen"/>
+    <node pkg="kinova_positional_control" type="gripper_control.py" name="kinova_gripper_control" output="screen"/>
 </launch>
