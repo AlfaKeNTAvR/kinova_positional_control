@@ -299,6 +299,11 @@ class KinovaPositionalControl:
 
             self.set_target_pose(compensated_input_pose, 'gcs')
 
+        # Publish a commanded target position in Global CS.
+        self.__relaxed_ik_commanded_gcs.publish(
+            self.__compose_pose_message(self.last_relaxed_ik_pose['gcs'])
+        )
+
     def initialization(self):
         """
         
@@ -402,13 +407,6 @@ class KinovaPositionalControl:
         ee_pose_goals.header.seq = 0
 
         self.__relaxed_ik_target_rikcs.publish(ee_pose_goals)
-
-        # Publish a commanded target position in Global CS.
-        right_arm_pose_gcs = self.__compose_pose_message(
-            self.last_relaxed_ik_pose['gcs']
-        )
-
-        self.__relaxed_ik_commanded_gcs.publish(right_arm_pose_gcs)
 
 
 def main():
