@@ -73,6 +73,7 @@ class KinovaPositionalControl:
 
         # # Public variables:
         self.is_initialized = False
+        self.joint_control_initialized = False
 
         # For an input to be executed by the robot tracking should be set to
         # True. When controller_is_tracked turns True, on_tracking_start becomes
@@ -229,6 +230,9 @@ class KinovaPositionalControl:
         
         """
 
+        if not self.is_initialized:
+            self.joint_control_initialized = True
+
         self.is_motion_finished = msg.data
 
     # # Private methods:
@@ -309,6 +313,15 @@ class KinovaPositionalControl:
         """
         
         """
+
+        print('\nWaiting for joints control...\n')
+
+        # Wait for joints control to initialize.
+        while not self.joint_control_initialized and not rospy.is_shutdown():
+            pass
+
+        print('\nJoints control is initialized.\n')
+
         self.__clear_arm_faults()
 
         # Limit joint velocities to 20% for homing.
