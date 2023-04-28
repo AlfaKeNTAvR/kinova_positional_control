@@ -37,6 +37,8 @@ class KinovaGripperControl:
 
         # # Private variables:
         self.__gripper_current = 0.0
+        self.__activate_force_grasping = False
+        self.__target_gripper_current = 0.0
 
         # # Public variables:
 
@@ -77,6 +79,8 @@ class KinovaGripperControl:
 
         """
 
+        self.__activate_force_grasping = False
+
         gripper_position = request.position
 
         if gripper_position < 0.0:
@@ -99,7 +103,8 @@ class KinovaGripperControl:
 
         """
 
-        self.__gripper_force_grasping(request.target_current)
+        self.__activate_force_grasping = True
+        self.__target_gripper_current = request.target_current
 
         response = True
 
@@ -156,30 +161,33 @@ class KinovaGripperControl:
 
         self.__gripper_command(gripper_command)
 
-    def __gripper_force_grasping(self, target_current):
+    def __gripper_force_grasping(self):
         """
         
         """
 
-        if target_current < 0.04:
-            target_current = 0.04
+        if self.__activate_force_grasping:
 
-        # Close the gripper until the current raises to a value higher than
-        # 0.04, indicating contact with an object.
-        while (
-            self.__gripper_current < target_current and not rospy.is_shutdown()
-        ):
-            # Close the gripper using a velocity command.
-            self.__gripper_control(
-                mode=2,
-                value=-0.1,
-            )
+            if self.__target_gripper_current < 0.04:
+                self.__target_gripper_current = 0.04
 
-        # Stop the gripper motion.
-        self.__gripper_control(
-            mode=2,
-            value=0.0,
-        )
+            # Close the gripper until the current raises to a value higher than
+            # 0.04, indicating contact with an object.
+            if (self.__gripper_current < self.__target_gripper_current):
+                # Close the gripper using a velocity command.
+                self.__gripper_control(
+                    mode=2,
+                    value=-0.08,
+                )
+
+            else:
+                # Stop the gripper motion.
+                self.__gripper_control(
+                    mode=2,
+                    value=0.0,
+                )
+
+                self.__activate_force_grasping = False
 
     # # Public methods:
     def main_loop(self):
@@ -187,7 +195,7 @@ class KinovaGripperControl:
         
         """
 
-        pass
+        self.__gripper_force_grasping()
 
 
 def main():
