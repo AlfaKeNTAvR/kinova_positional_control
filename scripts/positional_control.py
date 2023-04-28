@@ -92,11 +92,6 @@ class KinovaPositionalControl:
                     'position': np.array([0.0, 0.0, 0.0]),
                     'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 },
-            'rikcs':
-                {
-                    'position': np.array([0.0, 0.0, 0.0]),
-                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
-                }
         }
 
         # Last commanded Relaxed IK pose is required to compensate controller
@@ -124,11 +119,6 @@ class KinovaPositionalControl:
                     'position': np.array([0.0, 0.0, 0.0]),
                     'orientation': np.array([0.0, 0.0, 0.0]),
                 },
-            'rikcs':
-                {
-                    'position': np.array([0.0, 0.0, 0.0]),
-                    'orientation': np.array([0.0, 0.0, 0.0]),
-                }
         }
 
         # # ROS node:
@@ -292,7 +282,7 @@ class KinovaPositionalControl:
         
         """
 
-        if not self.is_initialized:  # or not s:
+        if not self.is_initialized:
             return
 
         # Pose control using controller input.
@@ -339,13 +329,20 @@ class KinovaPositionalControl:
         self.set_target_pose(home_pose, 'rikcs')
         self.__wait_for_motion()
 
+        start_pose = {
+            'position':
+                np.array([0.3, 0.0, 0.3]),
+            'orientation':
+                np.array([0.6532815, -0.2705981, -0.2705981, 0.6532815]),
+        }
+        self.set_target_pose(start_pose, 'gcs')
+        self.__wait_for_motion()
+
         print("\nHoming has finished.\n")
 
-        self.__pid_velocity_limit(0.75)
+        self.__pid_velocity_limit(1.0)
 
         self.is_initialized = True
-
-        print("\nThe arm is ready.\n")
 
     def set_target_pose(self, target_pose, coordinate_system):
         """
@@ -425,6 +422,8 @@ def main():
     )
 
     pose_controller.initialization()
+
+    print('\nPositional control is ready.\n')
 
     while not rospy.is_shutdown():
         pose_controller.main_loop()
