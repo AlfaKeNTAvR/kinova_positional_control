@@ -117,7 +117,7 @@ class KinovaPositionalControl:
             'gcs':
                 {
                     'position': np.array([0.0, 0.0, 0.0]),
-                    'orientation': np.array([0.0, 0.0, 0.0]),
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 },
         }
 
@@ -199,12 +199,19 @@ class KinovaPositionalControl:
                 self.input_pose['gcs']['position']
                 - self.last_relaxed_ik_pose['gcs']['position']
             )
+            self.input_relaxed_ik_difference['gcs']['orientation'] = (
+                transformations.quaternion_multiply(
+                    self.last_relaxed_ik_pose['gcs']['orientation'],
+                    transformations.quaternion_inverse(
+                        self.input_pose['gcs']['orientation']
+                    ),
+                )
+            )
 
     def __controller_pose_callback(self, msg):
         """
         
         """
-        # TODO: Add orientation.
 
         self.input_pose['gcs']['position'][0] = msg.position.x
         self.input_pose['gcs']['position'][1] = msg.position.y
@@ -295,6 +302,13 @@ class KinovaPositionalControl:
             compensated_input_pose['position'] = (
                 self.input_pose['gcs']['position']
                 - self.input_relaxed_ik_difference['gcs']['position']
+            )
+
+            compensated_input_pose['orientation'] = (
+                transformations.quaternion_multiply(
+                    self.input_relaxed_ik_difference['gcs']['orientation'],
+                    self.input_pose['gcs']['orientation'],
+                )
             )
 
             self.set_target_pose(compensated_input_pose, 'gcs')
