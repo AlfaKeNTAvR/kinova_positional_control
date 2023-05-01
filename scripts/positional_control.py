@@ -75,14 +75,6 @@ class KinovaPositionalControl:
         self.is_initialized = False
         self.joint_control_initialized = False
 
-        # For an input to be executed by the robot tracking should be set to
-        # True. When controller_is_tracked turns True, on_tracking_start becomes
-        # False to calculate input_relaxed_ik_difference, but once
-        # controller_is_tracked turns False, it turns on_tracking_start True
-        # again.
-        self.controller_is_tracked = False
-        self.on_tracking_start = True
-
         self.is_motion_finished = True
 
         # Input pose in Global and Relaxed IK coordinate systems.
@@ -107,18 +99,6 @@ class KinovaPositionalControl:
                     'position': np.array([0.0, 0.0, 0.0]),
                     'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 }
-        }
-
-        # This difference is calculated each time the tracking is started and
-        # subracted from future inputs during current tracking to compensate for
-        # linear misalignment between the global and relaxed_ik coordinate
-        # systems.
-        self.input_relaxed_ik_difference = {
-            'gcs':
-                {
-                    'position': np.array([0.0, 0.0, 0.0]),
-                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
-                },
         }
 
         # # ROS node:
@@ -160,14 +140,9 @@ class KinovaPositionalControl:
 
         # # Topic subscriber:
         rospy.Subscriber(
-            f'{self.ROBOT_NAME}/controller/tracking',
-            Bool,
-            self.__controller_tracking_callback,
-        )
-        rospy.Subscriber(
-            f'{self.ROBOT_NAME}/controller/pose',
+            f'{self.ROBOT_NAME}/input_pose',
             Pose,
-            self.__controller_pose_callback,
+            self.__input_pose_callback,
         )
 
         rospy.Subscriber(
@@ -179,36 +154,7 @@ class KinovaPositionalControl:
     # # Service handlers:
 
     # # Topic callbacks:
-    def __controller_tracking_callback(self, msg):
-        """
-        
-        """
-
-        self.controller_is_tracked = msg.data
-
-        if not self.controller_is_tracked:
-            self.on_tracking_start = True
-            return
-
-        if self.on_tracking_start:
-            self.on_tracking_start = False
-
-            # Calculate the compensation for coordinate systems
-            # misalignment.
-            self.input_relaxed_ik_difference['gcs']['position'] = (
-                self.input_pose['gcs']['position']
-                - self.last_relaxed_ik_pose['gcs']['position']
-            )
-            self.input_relaxed_ik_difference['gcs']['orientation'] = (
-                transformations.quaternion_multiply(
-                    self.last_relaxed_ik_pose['gcs']['orientation'],
-                    transformations.quaternion_inverse(
-                        self.input_pose['gcs']['orientation']
-                    ),
-                )
-            )
-
-    def __controller_pose_callback(self, msg):
+    def __input_pose_callback(self, msg):
         """
         
         """
@@ -292,26 +238,7 @@ class KinovaPositionalControl:
         if not self.is_initialized:
             return
 
-        # Pose control using controller input.
-        if self.controller_is_tracked:
-            compensated_input_pose = {
-                'position': np.array([0.0, 0.0, 0.0]),
-                'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
-            }
-
-            compensated_input_pose['position'] = (
-                self.input_pose['gcs']['position']
-                - self.input_relaxed_ik_difference['gcs']['position']
-            )
-
-            compensated_input_pose['orientation'] = (
-                transformations.quaternion_multiply(
-                    self.input_relaxed_ik_difference['gcs']['orientation'],
-                    self.input_pose['gcs']['orientation'],
-                )
-            )
-
-            self.set_target_pose(compensated_input_pose, 'gcs')
+        self.set_target_pose(self.input_pose['gcs'], 'gcs')
 
         # Publish a commanded target position in Global CS.
         self.__relaxed_ik_commanded_gcs.publish(
