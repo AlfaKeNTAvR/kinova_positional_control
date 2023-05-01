@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<launch>=
+    <include file="$(find kinova_positional_control)/launch/positional_control.launch"/>
+
+    <node pkg="kinova_positional_control" type="oculus_kinova_mapping.py" name="oculus_kinova_mapping" output="screen"/>>
+</launch>
