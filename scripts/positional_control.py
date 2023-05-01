@@ -268,20 +268,30 @@ class KinovaPositionalControl:
         # Let the node get initialized.
         rospy.sleep(2)
 
-        home_pose = {
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+        # Home position.
+        self.input_pose = {
+            'gcs':
+                {
+                    'position': np.array([0.0, 0.0, 0.0]),
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+                }
         }
-        self.set_target_pose(home_pose, 'rikcs')
+        self.set_target_pose(self.input_pose['gcs'], 'gcs')
         self.__wait_for_motion()
 
-        start_pose = {
-            'position':
-                np.array([0.3, 0.0, 0.3]),
-            'orientation':
-                np.array([0.6532815, -0.2705981, -0.2705981, 0.6532815]),
+        # Starting position.
+        self.input_pose = {
+            'gcs':
+                {
+                    'position':
+                        np.array([0.3, 0.15, 0.3]),
+                    'orientation':
+                        np.array(
+                            [0.6532815, -0.2705981, -0.2705981, 0.6532815]
+                        ),
+                }
         }
-        self.set_target_pose(start_pose, 'gcs')
+        self.set_target_pose(self.input_pose['gcs'], 'gcs')
         self.__wait_for_motion()
 
         print("\nHoming has finished.\n")
