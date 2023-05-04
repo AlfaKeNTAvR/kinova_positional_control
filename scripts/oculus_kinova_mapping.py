@@ -9,7 +9,7 @@ import transformations
 
 from geometry_msgs.msg import (Pose)
 
-from oculus.msg import (ControllerButtons)
+from oculus_ros.msg import (ControllerButtons)
 from kinova_positional_control.srv import (
     GripperForceGrasping,
     GripperPosition,
