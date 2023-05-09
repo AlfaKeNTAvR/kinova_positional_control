@@ -32,10 +32,6 @@ class KinovaPositionalControl:
         mounting_angles_deg=(0.0, 0.0, 0.0),
         ee_starting_position=(0.57, 0.0, 0.43),
         workspace_radius=1.2,
-        homing_pose={
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
-        },
         starting_pose={
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
@@ -82,7 +78,6 @@ class KinovaPositionalControl:
         self.WORKSPACE_CENTER = np.negative(ee_starting_position)
         self.WORKSPACE_RADIUS = workspace_radius
 
-        self.HOMING_POSE = homing_pose
         self.STARTING_POSE = starting_pose
 
         # # Private variables:
@@ -317,11 +312,6 @@ class KinovaPositionalControl:
 
         # Let the node get initialized.
         rospy.sleep(2)
-
-        # Homing pose.
-        self.input_pose = {'gcs': self.HOMING_POSE}
-        self.set_target_pose(self.input_pose['gcs'], 'gcs')
-        self.__wait_for_motion()
 
         # Starting pose.
         self.input_pose = {'gcs': self.STARTING_POSE}
