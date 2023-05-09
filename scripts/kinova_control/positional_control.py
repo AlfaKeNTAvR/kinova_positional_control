@@ -29,7 +29,9 @@ class KinovaPositionalControl:
     def __init__(
         self,
         name='my_gen3',
-        mounting_angles_deg=(0.0, -48.2, 90.0),
+        mounting_angles_deg=(0.0, 0.0, 0.0),
+        ee_starting_position=(0.57, 0.0, 0.43),
+        workspace_radius=1.2,
     ):
         """
         
@@ -68,6 +70,9 @@ class KinovaPositionalControl:
         self.ROTATE_RIKCS_TO_GCS = transformations.inverse_matrix(
             self.ROTATE_GCS_TO_RIKCS
         )
+
+        self.WORKSPACE_CENTER = np.negative(ee_starting_position)
+        self.WORKSPACE_RADIUS = workspace_radius
 
         # # Private variables:
 
@@ -219,6 +224,40 @@ class KinovaPositionalControl:
 
         return pose_message
 
+    def __check_boundaries(self, position):
+        # Calculate the vector from the center to the position.
+        vector_to_position = [
+            position[i] - self.WORKSPACE_CENTER[i]
+            for i in range(len(self.WORKSPACE_CENTER))
+        ]
+
+        # Calculate the distance from the center to the position.
+        distance_to_position = math.sqrt(
+            sum([x**2 for x in vector_to_position])
+        )
+
+        # If the position is inside the sphere, return its coordinates.
+        if distance_to_position <= self.WORKSPACE_RADIUS:
+            return position
+
+        # Calculate the vector from the center to the closest position on the
+        # sphere surface.
+        vector_to_surface = [
+            vector_to_position[i] * self.WORKSPACE_RADIUS / distance_to_position
+            for i in range(len(self.WORKSPACE_CENTER))
+        ]
+
+        # Calculate the coordinates of the closest position on the sphere
+        # surface.
+        closest_position = np.array(
+            [
+                self.WORKSPACE_CENTER[i] + vector_to_surface[i]
+                for i in range(len(self.WORKSPACE_CENTER))
+            ]
+        )
+
+        return closest_position
+
     def __wait_for_motion(self):
         """Blocks code execution until the flag is set or a node is shut down.
         
@@ -283,12 +322,8 @@ class KinovaPositionalControl:
         self.input_pose = {
             'gcs':
                 {
-                    'position':
-                        np.array([0.3, 0.15, 0.3]),
-                    'orientation':
-                        np.array(
-                            [0.6532815, -0.2705981, -0.2705981, 0.6532815]
-                        ),
+                    'position': np.array([0.0, 0.0, 0.0]),
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 }
         }
         self.set_target_pose(self.input_pose['gcs'], 'gcs')
@@ -319,6 +354,11 @@ class KinovaPositionalControl:
                 raise TypeError(
                     'Dictionary values should be of type np.ndarray.'
                 )
+
+        # Check if coordinates are within the arm's workspace.
+        target_pose['position'] = self.__check_boundaries(
+            target_pose['position']
+        )
 
         self.last_relaxed_ik_pose['gcs'] = target_pose.copy()
         self.last_relaxed_ik_pose['rikcs'] = target_pose.copy()
@@ -367,7 +407,7 @@ def main():
 
     pose_controller = KinovaPositionalControl(
         name='my_gen3',
-        mounting_angles_deg=(0.0, -48.2, 90.0),
+        workspace_radius=1.0,
     )
 
     pose_controller.initialization()
