@@ -29,7 +29,8 @@ class KinovaPositionalControl:
     def __init__(
         self,
         name='my_gen3',
-        mounting_angles_deg=(0.0, -48.2, 90.0),
+        ee_starting_position=(0.57, 0.0, 0.43),
+        workspace_radius=1.2,
     ):
         """
         
@@ -68,6 +69,9 @@ class KinovaPositionalControl:
         self.ROTATE_RIKCS_TO_GCS = transformations.inverse_matrix(
             self.ROTATE_GCS_TO_RIKCS
         )
+
+        self.WORKSPACE_CENTER = np.negative(ee_starting_position)
+        self.WORKSPACE_RADIUS = workspace_radius
 
         # # Private variables:
 
@@ -219,30 +223,39 @@ class KinovaPositionalControl:
 
         return pose_message
 
-    def __check_boundaries(self, center, radius, point):
-        # Calculate the vector from the center to the point.
-        vector_to_point = [point[i] - center[i] for i in range(len(center))]
-
-        # Calculate the distance from the center to the point.
-        distance_to_point = math.sqrt(sum([x**2 for x in vector_to_point]))
-
-        # If the point is inside the sphere, return its coordinates.
-        if distance_to_point <= radius:
-            return point
-
-        # Calculate the vector from the center to the closest point on the sphere
-        # surface.
-        vector_to_surface = [
-            vector_to_point[i] * radius / distance_to_point
-            for i in range(len(center))
+    def __check_boundaries(self, position):
+        # Calculate the vector from the center to the position.
+        vector_to_position = [
+            position[i] - self.WORKSPACE_CENTER[i]
+            for i in range(len(self.WORKSPACE_CENTER))
         ]
 
-        # Calculate the coordinates of the closest point on the sphere surface.
-        closest_point = np.array(
-            [center[i] + vector_to_surface[i] for i in range(len(center))]
+        # Calculate the distance from the center to the position.
+        distance_to_position = math.sqrt(
+            sum([x**2 for x in vector_to_position])
         )
 
-        return closest_point
+        # If the position is inside the sphere, return its coordinates.
+        if distance_to_position <= self.WORKSPACE_RADIUS:
+            return position
+
+        # Calculate the vector from the center to the closest position on the
+        # sphere surface.
+        vector_to_surface = [
+            vector_to_position[i] * self.WORKSPACE_RADIUS / distance_to_position
+            for i in range(len(self.WORKSPACE_CENTER))
+        ]
+
+        # Calculate the coordinates of the closest position on the sphere
+        # surface.
+        closest_position = np.array(
+            [
+                self.WORKSPACE_CENTER[i] + vector_to_surface[i]
+                for i in range(len(self.WORKSPACE_CENTER))
+            ]
+        )
+
+        return closest_position
 
     def __wait_for_motion(self):
         """Blocks code execution until the flag is set or a node is shut down.
@@ -295,14 +308,6 @@ class KinovaPositionalControl:
 
         # Home position.
         self.input_pose = {
-        # Check if coordinates are within the arm's workspace.
-        # TODO: center and radius should be hyper parameters.
-        target_pose['position'] = self.__check_boundaries(
-            center=np.array([-0.84, 0, 0]),
-            radius=1.2,
-            point=target_pose['position'],
-        )
-
             'gcs':
                 {
                     'position': np.array([0.0, 0.0, 0.0]),
@@ -353,6 +358,11 @@ class KinovaPositionalControl:
                     'Dictionary values should be of type np.ndarray.'
                 )
 
+        # Check if coordinates are within the arm's workspace.
+        target_pose['position'] = self.__check_boundaries(
+            target_pose['position']
+        )
+
         self.last_relaxed_ik_pose['gcs'] = target_pose.copy()
         self.last_relaxed_ik_pose['rikcs'] = target_pose.copy()
 
@@ -400,7 +410,7 @@ def main():
 
     pose_controller = KinovaPositionalControl(
         name='my_gen3',
-        mounting_angles_deg=(0.0, -48.2, 90.0),
+        workspace_radius=1.0,
     )
 
     pose_controller.initialization()
