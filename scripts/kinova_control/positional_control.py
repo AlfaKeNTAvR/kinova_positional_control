@@ -29,6 +29,7 @@ class KinovaPositionalControl:
     def __init__(
         self,
         name='my_gen3',
+        mounting_angles_deg=(0.0, 0.0, 0.0),
         ee_starting_position=(0.57, 0.0, 0.43),
         workspace_radius=1.2,
     ):
@@ -321,12 +322,8 @@ class KinovaPositionalControl:
         self.input_pose = {
             'gcs':
                 {
-                    'position':
-                        np.array([0.3, 0.15, 0.3]),
-                    'orientation':
-                        np.array(
-                            [0.6532815, -0.2705981, -0.2705981, 0.6532815]
-                        ),
+                    'position': np.array([0.0, 0.0, 0.0]),
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 }
         }
         self.set_target_pose(self.input_pose['gcs'], 'gcs')
