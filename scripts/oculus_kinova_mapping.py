@@ -152,9 +152,6 @@ class OculusKinovaMapping:
 
         self.__oculus_buttons = message
 
-        if self.TRACKING_MODE == 'hold':
-            self.tracking = self.__oculus_buttons.grip_button
-
     def __commanded_pose_callback(self, message):
         """
         
@@ -179,12 +176,20 @@ class OculusKinovaMapping:
         if (self.__tracking_state_machine_state == 0 and button):
             self.__tracking_state_machine_state = 1
 
+            if self.TRACKING_MODE == 'hold':
+                self.__calculate_compensation()
+                self.pose_tracking = True
+
         # State 1: Grip button was released. Tracking is activated.
         elif (self.__tracking_state_machine_state == 1 and not button):
-            self.__tracking_state_machine_state = 2
+            if self.TRACKING_MODE == 'press':
+                self.__tracking_state_machine_state = 2
+                self.__calculate_compensation()
+                self.pose_tracking = True
 
-            self.__calculate_compensation()
-            self.pose_tracking = True
+            elif self.TRACKING_MODE == 'hold':
+                self.__tracking_state_machine_state = 0
+                self.pose_tracking = False
 
         # State 2: Grip button was pressed. Tracking is deactivated.
         elif (self.__tracking_state_machine_state == 2 and button):
@@ -269,8 +274,7 @@ class OculusKinovaMapping:
         
         """
 
-        if self.TRACKING_MODE == 'press':
-            self.__tracking_state_machine(self.__oculus_buttons.grip_button)
+        self.__tracking_state_machine(self.__oculus_buttons.grip_button)
 
         if self.pose_tracking:
             self.publish_kinova_pose()
