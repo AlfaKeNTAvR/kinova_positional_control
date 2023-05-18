@@ -24,7 +24,7 @@ class KinovaGripperControl:
 
     def __init__(
         self,
-        name='my_gen3',
+        robot_name='my_gen3',
     ):
         """
         
@@ -33,7 +33,7 @@ class KinovaGripperControl:
         # # Private constants:
 
         # # Public constants:
-        self.ROBOT_NAME = name
+        self.ROBOT_NAME = robot_name
 
         # # Private variables:
         self.__gripper_current = 0.0
@@ -42,25 +42,21 @@ class KinovaGripperControl:
 
         # # Public variables:
 
-        # # ROS node:
-        rospy.init_node(f'{self.ROBOT_NAME}_gripper_control')
-        rospy.on_shutdown(self.__node_shutdown)
-
         # # Service provider:
         rospy.Service(
-            f'{self.ROBOT_NAME}/gripper/position',
+            f'/{self.ROBOT_NAME}/gripper/position',
             GripperPosition,
             self.__gripper_position_handler,
         )
         rospy.Service(
-            f'{self.ROBOT_NAME}/gripper/force_grasping',
+            f'/{self.ROBOT_NAME}/gripper/force_grasping',
             GripperForceGrasping,
             self.__gripper_force_grasping_handler,
         )
 
         # # Service subscriber:
         self.__gripper_command = rospy.ServiceProxy(
-            f'{self.ROBOT_NAME}/base/send_gripper_command',
+            f'/{self.ROBOT_NAME}/base/send_gripper_command',
             SendGripperCommand,
         )
 
@@ -68,7 +64,7 @@ class KinovaGripperControl:
 
         # # Topic subscriber:
         rospy.Subscriber(
-            f'{self.ROBOT_NAME}/base_feedback',
+            f'/{self.ROBOT_NAME}/base_feedback',
             BaseCyclic_Feedback,
             self.__kinova_feedback_callback,
         )
@@ -122,21 +118,6 @@ class KinovaGripperControl:
         )
 
     # # Private methods:
-    def __node_shutdown(self):
-        """
-        
-        """
-
-        print('\nNode is shutting down...\n')
-
-        # Stop the gripper motion.
-        self.__gripper_control(
-            mode=2,
-            value=0.0,
-        )
-
-        print('\nNode is shut down.\n')
-
     def __gripper_control(self, mode, value):
         """
 
@@ -197,15 +178,41 @@ class KinovaGripperControl:
 
         self.__gripper_force_grasping()
 
+    def node_shutdown(self):
+        """
+        
+        """
+
+        print(
+            f'\n/{self.ROBOT_NAME}/gripper_control: node is shutting down...\n'
+        )
+
+        # Stop the gripper motion.
+        self.__gripper_control(
+            mode=2,
+            value=0.0,
+        )
+
+        print(f'\n/{self.ROBOT_NAME}/gripper_control: node has shut down.\n')
+
 
 def main():
     """
     
     """
 
-    gripper_control = KinovaGripperControl()
+    rospy.init_node('gripper_control')
 
-    print('\nGripper control is ready.\n')
+    kinova_name = rospy.get_param(
+        param_name=f'{rospy.get_name()}/robot_name',
+        default='my_gen3',
+    )
+
+    gripper_control = KinovaGripperControl(robot_name=kinova_name)
+
+    rospy.on_shutdown(gripper_control.node_shutdown)
+
+    print(f'\n/{kinova_name}/gripper_control: ready.\n')
 
     while not rospy.is_shutdown():
         gripper_control.main_loop()
