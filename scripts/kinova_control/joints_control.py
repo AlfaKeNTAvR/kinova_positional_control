@@ -25,7 +25,7 @@ class KinovaJointsControl:
 
     def __init__(
         self,
-        name='my_gen3',
+        robot_name='my_gen3',
         continous_joints_indices=(0, 2, 4, 6),
         max_speeds=[1.396, 1.396, 1.396, 1.396, 1.222, 1.222, 1.222],
     ):
@@ -34,7 +34,7 @@ class KinovaJointsControl:
         """
 
         # Public constants:
-        self.ROBOT_NAME = name
+        self.ROBOT_NAME = robot_name
         self.MAX_SPEEDS = max_speeds  # Rad/s
         self.CONTINOUS_JOINTS_INDICES = continous_joints_indices
         self.JOINTS_NUMBER = 7
@@ -60,154 +60,155 @@ class KinovaJointsControl:
         # joint velocity topic.
         self.__goal_velocities = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-        rospy.init_node(f'{self.ROBOT_NAME}_joints_control', anonymous=True)
-        rospy.on_shutdown(self.__node_shutdown)
-
         # Service provider:
         rospy.Service(
-            'pid_vel_limit',
+            f'/{self.ROBOT_NAME}/pid/velocity_limit',
             PidVelocityLimit,
             self.__pid_velocity_limit_handler,
         )
 
         # Service subscriber:
         self.__stop_arm_srv = rospy.ServiceProxy(
-            'my_gen3/base/stop',
+            f'/{self.ROBOT_NAME}/base/stop',
             Stop,
         )
 
         # Topic publisher:
         self.__joint_velocity = rospy.Publisher(
-            f'{self.ROBOT_NAME}/in/joint_velocity',
+            f'/{self.ROBOT_NAME}/in/joint_velocity',
             Base_JointSpeeds,
             queue_size=1,
         )
 
         self.__pid_motion_finished = rospy.Publisher(
-            'pid/motion_finished',
+            f'/{self.ROBOT_NAME}/pid/motion_finished',
             Bool,
             queue_size=1,
         )
 
         self.__state_1 = rospy.Publisher(
-            'joint_1/state',
+            f'/{self.ROBOT_NAME}/joint_1/state',
             Float64,
             queue_size=1,
         )
         self.__state_2 = rospy.Publisher(
-            'joint_2/state',
+            f'/{self.ROBOT_NAME}/joint_2/state',
             Float64,
             queue_size=1,
         )
         self.__state_3 = rospy.Publisher(
-            'joint_3/state',
+            f'/{self.ROBOT_NAME}/joint_3/state',
             Float64,
             queue_size=1,
         )
         self.__state_4 = rospy.Publisher(
-            'joint_4/state',
+            f'/{self.ROBOT_NAME}/joint_4/state',
             Float64,
             queue_size=1,
         )
         self.__state_5 = rospy.Publisher(
-            '/joint_5/state',
+            f'/{self.ROBOT_NAME}/joint_5/state',
             Float64,
             queue_size=1,
         )
         self.__state_6 = rospy.Publisher(
-            'joint_6/state',
+            f'/{self.ROBOT_NAME}/joint_6/state',
             Float64,
             queue_size=1,
         )
         self.__state_7 = rospy.Publisher(
-            'joint_7/state',
+            f'/{self.ROBOT_NAME}/joint_7/state',
             Float64,
             queue_size=1,
         )
 
         self.__setpoint_1 = rospy.Publisher(
-            'joint_1/setpoint',
+            f'/{self.ROBOT_NAME}/joint_1/setpoint',
             Float64,
             queue_size=1,
         )
         self.__setpoint_2 = rospy.Publisher(
-            'joint_2/setpoint',
+            f'/{self.ROBOT_NAME}/joint_2/setpoint',
             Float64,
             queue_size=1,
         )
         self.__setpoint_3 = rospy.Publisher(
-            'joint_3/setpoint',
+            f'/{self.ROBOT_NAME}/joint_3/setpoint',
             Float64,
             queue_size=1,
         )
         self.__setpoint_4 = rospy.Publisher(
-            'joint_4/setpoint',
+            f'/{self.ROBOT_NAME}/joint_4/setpoint',
             Float64,
             queue_size=1,
         )
         self.__setpoint_5 = rospy.Publisher(
-            'joint_5/setpoint',
+            f'/{self.ROBOT_NAME}/joint_5/setpoint',
             Float64,
             queue_size=1,
         )
         self.__setpoint_6 = rospy.Publisher(
-            'joint_6/setpoint',
+            f'/{self.ROBOT_NAME}/joint_6/setpoint',
             Float64,
             queue_size=1,
         )
         self.__setpoint_7 = rospy.Publisher(
-            'joint_7/setpoint',
+            f'/{self.ROBOT_NAME}/joint_7/setpoint',
             Float64,
             queue_size=1,
         )
 
         # Topic subscriber:
         rospy.Subscriber(
-            f'{self.ROBOT_NAME}/base_feedback/joint_state',
+            f'/{self.ROBOT_NAME}/base_feedback/joint_state',
             JointState,
             self.__absolute_feedback_callback,
         )
 
         rospy.Subscriber(
-            'relaxed_ik/joint_angle_solutions',
+            f'/{self.ROBOT_NAME}/relaxed_ik/joint_angle_solutions',
             JointAngles,
             self.__absolute_setpoint_callback,
         )
 
         rospy.Subscriber(
-            'joint_1/control_effort',
+            f'/{self.ROBOT_NAME}/joint_1/control_effort',
             Float64,
             self.__control_effort_1_callback,
         )
         rospy.Subscriber(
-            'joint_2/control_effort',
+            f'/{self.ROBOT_NAME}/joint_2/control_effort',
             Float64,
             self.__control_effort_2_callback,
         )
         rospy.Subscriber(
-            'joint_3/control_effort',
+            f'/{self.ROBOT_NAME}/joint_3/control_effort',
             Float64,
             self.__control_effort_3_callback,
         )
         rospy.Subscriber(
-            'joint_4/control_effort',
+            f'/{self.ROBOT_NAME}/joint_4/control_effort',
             Float64,
             self.__control_effort_4_callback,
         )
         rospy.Subscriber(
-            'joint_5/control_effort',
+            f'/{self.ROBOT_NAME}/joint_5/control_effort',
             Float64,
             self.__control_effort_5_callback,
         )
         rospy.Subscriber(
-            'joint_6/control_effort',
+            f'/{self.ROBOT_NAME}/joint_6/control_effort',
             Float64,
             self.__control_effort_6_callback,
         )
         rospy.Subscriber(
-            'joint_7/control_effort',
+            f'/{self.ROBOT_NAME}/joint_7/control_effort',
             Float64,
             self.__control_effort_7_callback,
+        )
+
+        print(
+            f'\n/{self.ROBOT_NAME}/joints_control: waiting for Kinova feedback...\n'
         )
 
     def __absolute_feedback_callback(self, msg):
@@ -221,7 +222,11 @@ class KinovaJointsControl:
             self.__goal_absolute_positions = list(msg.position)
             self.is_initialized = True
 
-            print('\nKinova joints control is ready.')
+            print(
+                f'\n/{self.ROBOT_NAME}/joints_control: Kinova feedback was received!\n'
+            )
+
+            print(f'\n/{self.ROBOT_NAME}/joints_control: ready.')
 
             return
 
@@ -476,15 +481,17 @@ class KinovaJointsControl:
         self.publish_joint_motion_finished()
         self.publish_goal_velocities()
 
-    def __node_shutdown(self):
+    def node_shutdown(self):
         """
         
         """
 
-        print('\nNode is shutting down...')
+        print(f'\n/{self.ROBOT_NAME}/joints_control: node is shutting down...')
 
         # Stop arm movement
         self.__stop_arm_srv()
+
+        print(f'\n/{self.ROBOT_NAME}/joints_control: node has shut down.\n')
 
 
 def main():
@@ -492,12 +499,19 @@ def main():
     
     """
 
-    right_arm = KinovaJointsControl()
+    rospy.init_node('joints_control')
 
-    print('\nWaiting for Kinova feedback...\n')
+    kinova_name = rospy.get_param(
+        param_name=f'{rospy.get_name()}/robot_name',
+        default='my_gen3',
+    )
+
+    joints_control = KinovaJointsControl(robot_name=kinova_name)
+
+    rospy.on_shutdown(joints_control.node_shutdown)
 
     while not rospy.is_shutdown():
-        right_arm.main_loop()
+        joints_control.main_loop()
 
 
 if __name__ == '__main__':
