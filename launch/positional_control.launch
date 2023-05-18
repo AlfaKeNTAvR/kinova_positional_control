@@ -1,8 +1,26 @@
 <?xml version="1.0"?>
-<launch>=
-    <include file="$(find kinova_positional_control)/launch/joints_control.launch"/>
-    <include file="$(find relaxed_ik_ros1)/launch/relaxed_ik.launch"/>
+<launch>
+    <arg name="robot_name" default="my_gen3"/>
 
-    <node pkg="kinova_positional_control" type="positional_control.py" name="kinova_positional_control" output="screen"/>
-    <node pkg="kinova_positional_control" type="gripper_control.py" name="kinova_gripper_control" output="screen"/>
+    <!-- Joints control: -->
+    <include file="$(find kinova_positional_control)/launch/joints_control.launch">
+        <arg name="robot_name" value="$(arg robot_name)"/>
+    </include>
+
+    <group ns="/$(arg robot_name)">
+        <!-- Relaxed IK: -->
+        <include file="$(find relaxed_ik_ros1)/launch/relaxed_ik.launch">
+            <arg name="robot_name" value="$(arg robot_name)"/>
+        </include>
+
+        <!-- Positional control: -->
+        <node pkg="kinova_positional_control" type="positional_control.py" name="kinova_positional_control" output="screen">
+            <param name="robot_name" value="$(arg robot_name)"/>
+        </node>
+        
+        <!-- Gripper control: -->
+        <node pkg="kinova_positional_control" type="gripper_control.py" name="kinova_gripper_control" output="screen">
+            <param name="robot_name" value="$(arg robot_name)"/>
+        </node>   
+    </group>
 </launch>
