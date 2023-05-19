@@ -1,6 +1,25 @@
 <?xml version="1.0"?>
-<launch>=
-    <include file="$(find kinova_positional_control)/launch/positional_control.launch"/>
+<launch>
+    <arg name="robot_name" default="my_gen3"/>
+    <arg name="controller_side" default="right"/>
+    <arg name="tracking_mode" default="toggle"/>
 
-    <node pkg="kinova_positional_control" type="oculus_kinova_mapping.py" name="oculus_kinova_mapping" output="screen"/>>
+    <!-- Positional control: -->
+    <include file="$(find kinova_positional_control)/launch/positional_control.launch">
+        <arg name="robot_name" value="$(arg robot_name)"/>
+    </include>
+
+    <!-- Oculus controller feedback: -->
+    <include file="$(find oculus_ros)/launch/controller_feedback.launch">
+        <arg name="controller_side" value="$(arg controller_side)"/>
+    </include>
+
+    <!-- Oculus mapping: -->
+    <group ns="/$(arg robot_name)">
+        <node pkg="kinova_positional_control" type="oculus_kinova_mapping.py" name="oculus_kinova_mapping" output="screen">
+            <param name="robot_name" type="string" value="$(arg robot_name)"/>
+            <param name="controller_side" type="string" value="$(arg controller_side)"/>
+            <param name="tracking_mode" type="string" value="$(arg tracking_mode)"/>
+        </node>
+    </group>
 </launch>

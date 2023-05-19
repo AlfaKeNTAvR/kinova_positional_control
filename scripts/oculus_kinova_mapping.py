@@ -25,7 +25,7 @@ class OculusKinovaMapping:
         self,
         robot_name='my_gen3',
         controller_side='right',
-        tracking_mode='press',
+        tracking_mode='toggle',
         headset_mode='table',
     ):
         """
@@ -37,7 +37,7 @@ class OculusKinovaMapping:
                 'controller_side should be either "right" or "left".'
             )
 
-        if tracking_mode not in ['hold', 'press']:
+        if tracking_mode not in ['hold', 'toggle']:
             raise ValueError(
                 'tracking_mode should be either "hold" or "press".'
             )
@@ -87,34 +87,34 @@ class OculusKinovaMapping:
 
         # # Service subscriber:
         self.__gripper_force_grasping = rospy.ServiceProxy(
-            f'{self.ROBOT_NAME}/gripper/force_grasping',
+            f'/{self.ROBOT_NAME}/gripper/force_grasping',
             GripperForceGrasping,
         )
         self.__gripper_position = rospy.ServiceProxy(
-            f'{self.ROBOT_NAME}/gripper/position',
+            f'/{self.ROBOT_NAME}/gripper/position',
             GripperPosition,
         )
 
         # # Topic publisher:
         self.__kinova_pose = rospy.Publisher(
-            f'{self.ROBOT_NAME}/input_pose',
+            f'/{self.ROBOT_NAME}/input_pose',
             Pose,
             queue_size=1,
         )
 
         # # Topic subscriber:
         rospy.Subscriber(
-            f'oculus/{self.CONTROLLER_SIDE}/pose',
+            f'/{self.CONTROLLER_SIDE}/oculus/pose',
             Pose,
             self.__oculus_pose_callback,
         )
         rospy.Subscriber(
-            f'oculus/{self.CONTROLLER_SIDE}/buttons',
+            f'/{self.CONTROLLER_SIDE}/oculus/buttons',
             ControllerButtons,
             self.__oculus_buttons_callback,
         )
         rospy.Subscriber(
-            'relaxed_ik/commanded_pose_gcs',
+            f'/{self.ROBOT_NAME}/relaxed_ik/commanded_pose_gcs',
             Pose,
             self.__commanded_pose_callback,
         )
@@ -182,7 +182,7 @@ class OculusKinovaMapping:
 
         # State 1: Grip button was released. Tracking is activated.
         elif (self.__tracking_state_machine_state == 1 and not button):
-            if self.TRACKING_MODE == 'press':
+            if self.TRACKING_MODE == 'toggle':
                 self.__tracking_state_machine_state = 2
                 self.__calculate_compensation()
                 self.pose_tracking = True
@@ -323,17 +323,18 @@ class OculusKinovaMapping:
 
         self.__kinova_pose.publish(pose_message)
 
+    def node_shutdown(self):
+        """
+        
+        """
 
-def node_shutdown():
-    """
-    
-    """
+        print(
+            f'\n/{self.ROBOT_NAME}/oculus_mapping: node is shutting down...\n'
+        )
 
-    print('\nNode is shutting down...\n')
+        # TODO: Stop arm motion.
 
-    # TODO: Stop arm motion.
-
-    print('\nNode is shut down.\n')
+        print(f'\n/{self.ROBOT_NAME}/oculus_mapping: node is shut down.\n')
 
 
 def main():
@@ -341,21 +342,36 @@ def main():
 
     """
 
-    # # ROS node:
     rospy.init_node('oculus_kinova_mapping')
-    rospy.on_shutdown(node_shutdown)
 
-    right_arm_mapping = OculusKinovaMapping(
-        robot_name='my_gen3',
-        controller_side='right',
-        tracking_mode='press',
+    kinova_name = rospy.get_param(
+        param_name=f'{rospy.get_name()}/robot_name',
+        default='my_gen3',
+    )
+
+    controller_side = rospy.get_param(
+        param_name=f'{rospy.get_name()}/controller_side',
+        default='right',
+    )
+
+    tracking_mode = rospy.get_param(
+        param_name=f'{rospy.get_name()}/tracking_mode',
+        default='toggle',
+    )
+
+    oculus_kinova_mapping = OculusKinovaMapping(
+        robot_name=kinova_name,
+        controller_side=controller_side,
+        tracking_mode=tracking_mode,
         headset_mode='table',
     )
 
-    print('\nOculus-Kinova mapping is ready.\n')
+    rospy.on_shutdown(oculus_kinova_mapping.node_shutdown)
+
+    print(f'\n/{kinova_name}/oculus_mapping: ready.\n')
 
     while not rospy.is_shutdown():
-        right_arm_mapping.main_loop()
+        oculus_kinova_mapping.main_loop()
 
 
 if __name__ == '__main__':
