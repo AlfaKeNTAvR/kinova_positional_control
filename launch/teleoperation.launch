@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="robot_name" default="my_gen3"/>
+    <arg name="tracking_mode" default="toggle"/>
+    <arg name="compensate_orientation" default="true"/>
+
+    <!-- Positional control: -->
+    <include file="$(find kinova_positional_control)/launch/positional_control.launch">
+        <arg name="robot_name" value="$(arg robot_name)"/>
+    </include>
+
+    <!-- Teleoperation module: -->
+    <group ns="/$(arg robot_name)">
+        <node pkg="kinova_positional_control" type="teleoperation.py" name="kinova_teleoperation" output="screen">
+            <param name="robot_name" value="$(arg robot_name)"/>
+            <param name="tracking_mode" value="$(arg tracking_mode)"/>
+            <param name="compensate_orientation" value="$(arg compensate_orientation)"/>
+        </node>   
+    </group>
+</launch>
