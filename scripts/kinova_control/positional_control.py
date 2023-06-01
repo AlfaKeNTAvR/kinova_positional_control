@@ -211,6 +211,10 @@ class KinovaPositionalControl:
         return pose_message
 
     def __check_boundaries(self, position):
+        """
+        
+        """
+
         # Calculate the vector from the center to the position.
         vector_to_position = [
             position[i] - self.WORKSPACE_CENTER[i]
@@ -347,9 +351,10 @@ class KinovaPositionalControl:
                 )
 
         # Check if coordinates are within the arm's workspace.
-        target_pose['position'] = self.__check_boundaries(
-            target_pose['position']
-        )
+        # TODO: Which coordinates system: GCS or RIKCS?
+        # target_pose['position'] = self.__check_boundaries(
+        #     target_pose['position']
+        # )
 
         self.last_relaxed_ik_pose['gcs'] = target_pose.copy()
         self.last_relaxed_ik_pose['rikcs'] = target_pose.copy()
