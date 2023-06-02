@@ -4,7 +4,7 @@
     <arg name="tracking_mode" default="toggle"/>
     <arg name="compensate_orientation" default="true"/>
 
-    <!-- Positional control: -->
+    <!-- Positional and gripper control: -->
     <include file="$(find kinova_positional_control)/launch/positional_control.launch">
         <arg name="robot_name" value="$(arg robot_name)"/>
     </include>

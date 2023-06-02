@@ -279,30 +279,36 @@ class KinovaPositionalControl:
         
         """
 
-        print(
-            f'\n/{self.ROBOT_NAME}/positional_control: node is shutting down...'
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/positional_control: node is shutting down...',
         )
 
         # Stop the arm motion.
         self.__stop_arm()
 
-        print(f'\n/{self.ROBOT_NAME}/positional_control: node has shut down.')
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/positional_control: node has shut down.',
+        )
 
     def initialization(self):
         """
         
         """
 
-        print(
-            f'\n/{self.ROBOT_NAME}/positional_control: waiting for joints control...\n'
-        )
-
         # Wait for joints control to initialize.
         while not self.joint_control_initialized and not rospy.is_shutdown():
+            rospy.logwarn_throttle(
+                5,
+                (
+                    f'/{self.ROBOT_NAME}/positional_control: waiting for joints_control...\n'
+                    'Make sure joints_control is running properly!'
+                ),
+            )
+
             pass
 
-        print(
-            f'\n/{self.ROBOT_NAME}/positional_control: joints control has initialized.\n'
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/positional_control: joints control has initialized.',
         )
 
         self.__clear_arm_faults()
@@ -310,8 +316,8 @@ class KinovaPositionalControl:
         # Limit joint velocities to 20% for homing.
         self.__pid_velocity_limit(0.2)
 
-        print(
-            f'\n/{self.ROBOT_NAME}/positional_control: homing has started...\n'
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/positional_control: homing has started...',
         )
 
         # Let the node get initialized.
@@ -322,13 +328,17 @@ class KinovaPositionalControl:
         self.set_target_pose(self.input_pose['gcs'], 'gcs')
         self.__wait_for_motion()
 
-        print(
-            f'\n/{self.ROBOT_NAME}/positional_control: homing has finished.\n'
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/positional_control: homing has finished.',
         )
 
         self.__pid_velocity_limit(1.0)
 
         self.is_initialized = True
+
+        rospy.loginfo_once(
+            f'\033[92m/{self.ROBOT_NAME}/positional_control: ready.\033[0m',
+        )
 
     def set_target_pose(self, target_pose, coordinate_system):
         """
@@ -401,7 +411,10 @@ def main():
     
     """
 
-    rospy.init_node('positional_control')
+    rospy.init_node(
+        'positional_control',
+        log_level=rospy.INFO,  # TODO: Make this a launch file parameter.
+    )
 
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',
@@ -416,8 +429,6 @@ def main():
     rospy.on_shutdown(pose_controller.node_shutdown)
 
     pose_controller.initialization()
-
-    print(f'\n/{kinova_name}/positional_control: ready.\n')
 
     while not rospy.is_shutdown():
         pose_controller.main_loop()

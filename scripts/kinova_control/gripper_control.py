@@ -183,8 +183,8 @@ class KinovaGripperControl:
         
         """
 
-        print(
-            f'\n/{self.ROBOT_NAME}/gripper_control: node is shutting down...\n'
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/gripper_control: node is shutting down...',
         )
 
         # Stop the gripper motion.
@@ -193,7 +193,9 @@ class KinovaGripperControl:
             value=0.0,
         )
 
-        print(f'\n/{self.ROBOT_NAME}/gripper_control: node has shut down.\n')
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/gripper_control: node has shut down.',
+        )
 
 
 def main():
@@ -201,7 +203,10 @@ def main():
     
     """
 
-    rospy.init_node('gripper_control')
+    rospy.init_node(
+        'gripper_control',
+        log_level=rospy.INFO,  # TODO: Make this a launch file parameter.
+    )
 
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',
@@ -212,7 +217,9 @@ def main():
 
     rospy.on_shutdown(gripper_control.node_shutdown)
 
-    print(f'\n/{kinova_name}/gripper_control: ready.\n')
+    rospy.loginfo_once(
+        f'\033[92m/{kinova_name}/gripper_control: ready.\033[0m',
+    )
 
     while not rospy.is_shutdown():
         gripper_control.main_loop()

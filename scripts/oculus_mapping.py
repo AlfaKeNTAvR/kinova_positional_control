@@ -186,11 +186,13 @@ class OculusMapping:
         
         """
 
-        print(
-            f'\n/{self.ROBOT_NAME}/oculus_mapping: node is shutting down...\n'
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/oculus_mapping: node is shutting down...',
         )
 
-        print(f'\n/{self.ROBOT_NAME}/oculus_mapping: node is shut down.\n')
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/oculus_mapping: node has shut down.',
+        )
 
 
 def main():
@@ -198,7 +200,10 @@ def main():
 
     """
 
-    rospy.init_node('oculus_kinova_mapping')
+    rospy.init_node(
+        'oculus_mapping',
+        log_level=rospy.INFO,  # TODO: Make this a launch file parameter.
+    )
 
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',
@@ -218,7 +223,7 @@ def main():
 
     rospy.on_shutdown(oculus_kinova_mapping.node_shutdown)
 
-    print(f'\n/{kinova_name}/oculus_mapping: ready.\n')
+    rospy.loginfo_once(f'\033[92m/{kinova_name}/oculus_mapping: ready.\033[0m',)
 
     while not rospy.is_shutdown():
         oculus_kinova_mapping.main_loop()

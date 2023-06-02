@@ -207,10 +207,6 @@ class KinovaJointsControl:
             self.__control_effort_7_callback,
         )
 
-        print(
-            f'\n/{self.ROBOT_NAME}/joints_control: waiting for Kinova feedback...\n'
-        )
-
     def __absolute_feedback_callback(self, msg):
         """
         
@@ -222,11 +218,12 @@ class KinovaJointsControl:
             self.__goal_absolute_positions = list(msg.position)
             self.is_initialized = True
 
-            print(
-                f'\n/{self.ROBOT_NAME}/joints_control: Kinova feedback was received!\n'
+            rospy.loginfo_once(
+                f'/{self.ROBOT_NAME}/joints_control: Kinova feedback was received!',
             )
-
-            print(f'\n/{self.ROBOT_NAME}/joints_control: ready.')
+            rospy.loginfo_once(
+                f'\033[92m/{self.ROBOT_NAME}/joints_control: ready.\033[0m',
+            )
 
             return
 
@@ -466,12 +463,33 @@ class KinovaJointsControl:
         # Publish a velocity message.
         self.__joint_velocity.publish(velocity_message)
 
+        rospy.logdebug_throttle_identical(
+            10,
+            (
+                f'j1_vel: {round(velocity_message.joint_speeds[0].value, 2)} '
+                f'j2_vel: {round(velocity_message.joint_speeds[1].value, 2)} '
+                f'j3_vel: {round(velocity_message.joint_speeds[2].value, 2)} '
+                f'j4_vel: {round(velocity_message.joint_speeds[3].value, 2)} '
+                f'j5_vel: {round(velocity_message.joint_speeds[4].value, 2)} '
+                f'j6_vel: {round(velocity_message.joint_speeds[5].value, 2)} '
+                f'j7_vel: {round(velocity_message.joint_speeds[6].value, 2)} '
+            ),
+        )
+
     def main_loop(self):
         """
         
         """
 
         if not self.is_initialized:
+            rospy.logwarn_throttle(
+                5,
+                (
+                    f'/{self.ROBOT_NAME}/joints_control: waiting for Kinova feedback...\n'
+                    'Make sure kortex_driver is running properly!'
+                ),
+            )
+
             return
 
         # Recalculate absolute feedback and setpoint into relative coordinates.
@@ -486,12 +504,16 @@ class KinovaJointsControl:
         
         """
 
-        print(f'\n/{self.ROBOT_NAME}/joints_control: node is shutting down...')
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/joints_control: node is shutting down...',
+        )
 
         # Stop arm movement
         self.__stop_arm_srv()
 
-        print(f'\n/{self.ROBOT_NAME}/joints_control: node has shut down.\n')
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/joints_control: node has shut down.',
+        )
 
 
 def main():
@@ -499,7 +521,10 @@ def main():
     
     """
 
-    rospy.init_node('joints_control')
+    rospy.init_node(
+        'joints_control',
+        log_level=rospy.INFO,  # TODO: Make this a launch file parameter.
+    )
 
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',

@@ -1,12 +1,13 @@
 <?xml version="1.0"?>
 <launch>
     <arg name="robot_name" default="my_gen3"/>
+    <arg name="logger_output" default="log"/>
 
     <!-- PID control: -->
     <group ns="/$(arg robot_name)">->
 
       <!-- Joint 1 control: -->
-      <node name="controller" pkg="pid" type="controller" ns="joint_1" output="screen" >
+      <node name="controller" pkg="pid" type="controller" ns="joint_1" output="$(arg logger_output)" >
         <param name="Kp" value="3.5" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
@@ -15,7 +16,7 @@
       </node>
 
       <!-- Joint 2 control: -->
-      <node name="controller" pkg="pid" type="controller" ns="joint_2" output="screen" >
+      <node name="controller" pkg="pid" type="controller" ns="joint_2" output="$(arg logger_output)" >
         <param name="Kp" value="4.0" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
@@ -24,7 +25,7 @@
       </node>
 
       <!-- Joint 3 control: -->
-      <node name="controller" pkg="pid" type="controller" ns="joint_3" output="screen" >
+      <node name="controller" pkg="pid" type="controller" ns="joint_3" output="$(arg logger_output)" >
         <param name="Kp" value="3.5" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
@@ -33,7 +34,7 @@
       </node>
 
       <!-- Joint 4 control: -->
-      <node name="controller" pkg="pid" type="controller" ns="joint_4" output="screen" >
+      <node name="controller" pkg="pid" type="controller" ns="joint_4" output="$(arg logger_output)" >
         <param name="Kp" value="4.5" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
@@ -42,7 +43,7 @@
       </node>
 
       <!-- Joint 5 control: -->
-      <node name="controller" pkg="pid" type="controller" ns="joint_5" output="screen" >
+      <node name="controller" pkg="pid" type="controller" ns="joint_5" output="$(arg logger_output)" >
         <param name="Kp" value="3.5" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
@@ -51,7 +52,7 @@
       </node>
 
       <!-- Joint 6 control: -->
-      <node name="controller" pkg="pid" type="controller" ns="joint_6" output="screen" >
+      <node name="controller" pkg="pid" type="controller" ns="joint_6" output="$(arg logger_output)" >
         <param name="Kp" value="5.0" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
@@ -60,7 +61,7 @@
       </node>
 
       <!-- Joint 7 control: -->
-      <node name="controller" pkg="pid" type="controller" ns="joint_7" output="screen" >
+      <node name="controller" pkg="pid" type="controller" ns="joint_7" output="$(arg logger_output)" >
         <param name="Kp" value="4.5" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />

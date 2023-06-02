@@ -355,12 +355,16 @@ class KinovaTeleoperation:
         
         """
 
-        print(f'\n/{self.ROBOT_NAME}/teleoperation: node is shutting down...\n')
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/teleoperation node is shutting down...',
+        )
 
-        # Stop the arm motion.
+        # TODO: Stop the arm motion.
         # self.__stop_arm()
 
-        print(f'\n/{self.ROBOT_NAME}/teleoperation: node is shut down.\n')
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/teleoperation: node has shut down.',
+        )
 
 
 def main():
@@ -368,7 +372,10 @@ def main():
 
     """
 
-    rospy.init_node('teleoperation')
+    rospy.init_node(
+        'teleoperation',
+        log_level=rospy.INFO,  # TODO: Make this a launch file parameter.
+    )
 
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',
