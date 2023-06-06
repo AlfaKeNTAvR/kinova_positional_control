@@ -11,7 +11,7 @@
 
     <!-- Teleoperation module: -->
     <group ns="/$(arg robot_name)">
-        <node pkg="kinova_positional_control" type="teleoperation.py" name="kinova_teleoperation" output="screen">
+        <node pkg="kinova_positional_control" type="teleoperation.py" name="teleoperation" output="screen">
             <param name="robot_name" value="$(arg robot_name)"/>
             <param name="tracking_mode" value="$(arg tracking_mode)"/>
             <param name="compensate_orientation" value="$(arg compensate_orientation)"/>

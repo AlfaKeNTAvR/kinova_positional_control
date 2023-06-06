@@ -5,6 +5,8 @@
 
 import rospy
 
+from std_msgs.msg import (Bool)
+
 from kortex_driver.msg import (
     BaseCyclic_Feedback,
     Finger,
@@ -42,6 +44,20 @@ class KinovaGripperControl:
 
         # # Public variables:
 
+        # # Initialization and dependency status topics:
+        self.__is_initialized = False
+        self.__dependency_initialized = False
+
+        self.__node_is_initialized = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/gripper_control/is_initialized',
+            Bool,
+            queue_size=1,
+        )
+
+        self.__dependency_status = {
+            'kortex_driver': False,
+        }
+
         # # Service provider:
         rospy.Service(
             f'/{self.ROBOT_NAME}/gripper/position',
@@ -63,11 +79,13 @@ class KinovaGripperControl:
         # # Topic publisher:
 
         # # Topic subscriber:
-        rospy.Subscriber(
+        self.__kortex_feedback = rospy.Subscriber(
             f'/{self.ROBOT_NAME}/base_feedback',
             BaseCyclic_Feedback,
             self.__kinova_feedback_callback,
         )
+
+    # # Dependency status callbacks:
 
     # # Service handlers:
     def __gripper_position_handler(self, request):
@@ -112,12 +130,92 @@ class KinovaGripperControl:
         
         """
 
+        if not self.__is_initialized:
+            self.__dependency_status['kortex_driver'] = True
+
+            rospy.loginfo(
+                (
+                    f'/{self.ROBOT_NAME}/gripper_control: '
+                    'kortex_driver was initialized!'
+                ),
+            )
+
         self.__gripper_current = (
             message.interconnect.oneof_tool_feedback.gripper_feedback[0].
             motor[0].current_motor
         )
 
     # # Private methods:
+    def __check_initialization(self):
+        """Monitors required criteria and sets is_initialized variable.
+
+        Monitors nodes' dependency status by checking if dependency's
+        is_initialized topic has at most one publisher (this ensures that
+        dependency node is alive and does not have any duplicates) and that it
+        publishes True. If dependency's status was True, but get_num_connections
+        is not equal to 1, this means that the connection is lost and emergency
+        actions should be performed.
+
+        Once all dependencies are initialized and additional criteria met, the
+        nodes is_initialized status changes to True. This status can change to
+        False any time to False if some criteria are no longer met.
+        
+        """
+
+        self.__dependency_initialized = True
+
+        if self.__kortex_feedback.get_num_connections() != 1:
+            if self.__dependency_status['kortex_driver']:
+                rospy.logerr(
+                    (
+                        f'/{self.ROBOT_NAME}/gripper_control: '
+                        f'lost connection to kortex_driver!'
+                    )
+                )
+
+                # # Emergency actions on lost connection:
+                # NOTE (optionally): Add code, which needs to be executed if
+                # connection to any of dependencies was lost.
+
+            self.__dependency_status['kortex_driver'] = False
+
+        if not self.__dependency_status['kortex_driver']:
+            self.__dependency_initialized = False
+
+        if not self.__dependency_initialized:
+            waiting_for = ''
+            for key in self.__dependency_status:
+                if not self.__dependency_status[key]:
+                    waiting_for += f'\n- waiting for {key}...'
+
+            rospy.logwarn_throttle(
+                15,
+                (
+                    f'/{self.ROBOT_NAME}/gripper_control:'
+                    f'{waiting_for}'
+                    # f'\nMake sure those dependencies are running properly!'
+                ),
+            )
+
+        # NOTE: Add more initialization criterea if needed.
+        if (self.__dependency_initialized):
+            if not self.__is_initialized:
+                rospy.loginfo(
+                    f'\033[92m/{self.ROBOT_NAME}/gripper_control: ready.\033[0m',
+                )
+
+                self.__is_initialized = True
+
+        else:
+            if self.__is_initialized:
+                # NOTE (optionally): Add code, which needs to be executed if the
+                # nodes's status changes from True to False.
+                pass
+
+            self.__is_initialized = False
+
+        self.__node_is_initialized.publish(self.__is_initialized)
+
     def __gripper_control(self, mode, value):
         """
 
@@ -176,6 +274,11 @@ class KinovaGripperControl:
         
         """
 
+        self.__check_initialization()
+
+        if not self.__is_initialized:
+            return
+
         self.__gripper_force_grasping()
 
     def node_shutdown(self):
@@ -208,6 +311,9 @@ def main():
         log_level=rospy.INFO,  # TODO: Make this a launch file parameter.
     )
 
+    rospy.loginfo('\n\n\n\n\n')  # Add whitespaces to separate logs.
+
+    # # ROS parameters:
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',
         default='my_gen3',
@@ -216,10 +322,6 @@ def main():
     gripper_control = KinovaGripperControl(robot_name=kinova_name)
 
     rospy.on_shutdown(gripper_control.node_shutdown)
-
-    rospy.loginfo_once(
-        f'\033[92m/{kinova_name}/gripper_control: ready.\033[0m',
-    )
 
     while not rospy.is_shutdown():
         gripper_control.main_loop()

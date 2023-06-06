@@ -81,12 +81,10 @@ class KinovaPositionalControl:
         self.STARTING_POSE = starting_pose
 
         # # Private variables:
+        self.__is_homed = False
+        self.__is_motion_finished = True
 
         # # Public variables:
-        self.is_initialized = False
-        self.joint_control_initialized = False
-
-        self.is_motion_finished = True
 
         # Input pose in Global and Relaxed IK coordinate systems.
         self.input_pose = {
@@ -112,11 +110,41 @@ class KinovaPositionalControl:
                 }
         }
 
+        # # Initialization and dependency status topics:
+        self.__is_initialized = False
+        self.__dependency_initialized = False
+
+        self.__node_is_initialized = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/positional_control/is_initialized',
+            Bool,
+            queue_size=1,
+        )
+
+        self.__dependency_status = {
+            'joints_control': False,
+            'relaxed_ik': False,
+        }
+
+        self.__dependency_status_topics = {
+            'joints_control':
+                rospy.Subscriber(
+                    f'/{self.ROBOT_NAME}/joints_control/is_initialized',
+                    Bool,
+                    self.__joints_control_callback,
+                ),
+            'relaxed_ik':
+                rospy.Subscriber(
+                    f'/{self.ROBOT_NAME}/relaxed_ik/is_initialized',
+                    Bool,
+                    self.__relaxed_ik_callback,
+                ),
+        }
+
         # # Service provider:
 
         # # Service subscriber:
         self.__pid_velocity_limit = rospy.ServiceProxy(
-            f'/{self.ROBOT_NAME}/pid/velocity_limit',
+            f'/{self.ROBOT_NAME}/joints_control/velocity_limit',
             PidVelocityLimit,
         )
 
@@ -143,16 +171,31 @@ class KinovaPositionalControl:
 
         # # Topic subscriber:
         rospy.Subscriber(
-            f'/{self.ROBOT_NAME}/input_pose',
+            f'/{self.ROBOT_NAME}/positional_control/input_pose',
             Pose,
             self.__input_pose_callback,
         )
 
         rospy.Subscriber(
-            f'/{self.ROBOT_NAME}/pid/motion_finished',
+            f'/{self.ROBOT_NAME}/joints_control/motion_finished',
             Bool,
             self.__pid_motion_finished_callback,
         )
+
+    # # Dependency status callbacks:
+    def __joints_control_callback(self, msg):
+        """
+        
+        """
+
+        self.__dependency_status['joints_control'] = msg.data
+
+    def __relaxed_ik_callback(self, msg):
+        """
+        
+        """
+
+        self.__dependency_status['relaxed_ik'] = msg.data
 
     # # Service handlers:
 
@@ -176,12 +219,78 @@ class KinovaPositionalControl:
         
         """
 
-        if not self.is_initialized:
+        if not self.__is_initialized:
             self.joint_control_initialized = True
 
-        self.is_motion_finished = msg.data
+        self.__is_motion_finished = msg.data
 
     # # Private methods:
+    def __check_initialization(self):
+        """Monitors required criteria and sets is_initialized variable.
+
+        Monitors nodes' dependency status by checking if dependency's
+        is_initialized topic has at most one publisher (this ensures that
+        dependency node is alive and does not have any duplicates) and that it
+        publishes True. If dependency's status was True, but get_num_connections
+        is not equal to 1, this means that the connection is lost and emergency
+        actions should be performed.
+
+        Once all dependencies are initialized and additional criteria met, the
+        nodes is_initialized status changes to True. This status can change to
+        False any time to False if some criteria are no longer met.
+        
+        """
+
+        self.__dependency_initialized = True
+
+        for key in self.__dependency_status:
+            if self.__dependency_status_topics[key].get_num_connections() != 1:
+                if self.__dependency_status[key]:
+                    rospy.logerr(
+                        (
+                            f'/{self.ROBOT_NAME}/positional_control: '
+                            f'lost connection to {key}!'
+                        )
+                    )
+
+                    # # Emergency actions on lost connection:
+                    # NOTE: Add code, which needs to be executed if connection
+                    # to any of dependencies was lost.
+
+                self.__dependency_status[key] = False
+
+            if not self.__dependency_status[key]:
+                self.__dependency_initialized = False
+
+        if not self.__dependency_initialized:
+            waiting_for = ''
+            for key in self.__dependency_status:
+                if not self.__dependency_status[key]:
+                    waiting_for += f'\n- waiting for {key}...'
+
+            rospy.logwarn_throttle(
+                15,
+                (
+                    f'/{self.ROBOT_NAME}/positional_control:'
+                    f'{waiting_for}'
+                    # f'\nMake sure those dependencies are running properly!'
+                ),
+            )
+
+        # NOTE: Add more initialization criterea if needed.
+        if (self.__dependency_initialized and self.__is_homed):
+            if not self.__is_initialized:
+                rospy.loginfo(
+                    f'\033[92m/{self.ROBOT_NAME}/positional_control: ready.\033[0m',
+                )
+
+                self.__is_initialized = True
+
+        else:
+            self.__is_initialized = False
+
+        self.__node_is_initialized.publish(self.__is_initialized)
+
     def __compose_pose_message(self, target_pose):
         """
         target_pose: dict
@@ -255,8 +364,46 @@ class KinovaPositionalControl:
 
         rospy.sleep(1)  # Allow a motion to start.
 
-        while not self.is_motion_finished and not rospy.is_shutdown():
+        while not self.__is_motion_finished and not rospy.is_shutdown():
             pass
+
+    def __homing(self):
+        """
+        
+        """
+
+        # Wait for dependencies to initialize.
+        if not self.__dependency_initialized:
+            return
+
+        rospy.loginfo(
+            f'/{self.ROBOT_NAME}/positional_control: dependencies have initialized.',
+        )
+
+        self.__clear_arm_faults()
+
+        # Limit joint velocities to 20% for homing.
+        self.__pid_velocity_limit(0.2)
+
+        rospy.loginfo(
+            f'/{self.ROBOT_NAME}/positional_control: homing has started...',
+        )
+
+        # Let the node get initialized.
+        rospy.sleep(2)
+
+        # Starting pose.
+        self.input_pose = {'gcs': self.STARTING_POSE}
+        self.set_target_pose(self.input_pose['gcs'], 'gcs')
+        self.__wait_for_motion()
+
+        rospy.loginfo(
+            f'/{self.ROBOT_NAME}/positional_control: homing has finished.',
+        )
+
+        self.__pid_velocity_limit(1.0)
+
+        self.__is_homed = True
 
     # # Public methods:
     def main_loop(self):
@@ -264,7 +411,12 @@ class KinovaPositionalControl:
         
         """
 
-        if not self.is_initialized:
+        self.__check_initialization()
+
+        if not self.__is_homed:
+            self.__homing()
+
+        if not self.__is_initialized:
             return
 
         self.set_target_pose(self.input_pose['gcs'], 'gcs')
@@ -288,56 +440,6 @@ class KinovaPositionalControl:
 
         rospy.loginfo_once(
             f'/{self.ROBOT_NAME}/positional_control: node has shut down.',
-        )
-
-    def initialization(self):
-        """
-        
-        """
-
-        # Wait for joints control to initialize.
-        while not self.joint_control_initialized and not rospy.is_shutdown():
-            rospy.logwarn_throttle(
-                5,
-                (
-                    f'/{self.ROBOT_NAME}/positional_control: waiting for joints_control...\n'
-                    'Make sure joints_control is running properly!'
-                ),
-            )
-
-            pass
-
-        rospy.loginfo_once(
-            f'/{self.ROBOT_NAME}/positional_control: joints control has initialized.',
-        )
-
-        self.__clear_arm_faults()
-
-        # Limit joint velocities to 20% for homing.
-        self.__pid_velocity_limit(0.2)
-
-        rospy.loginfo_once(
-            f'/{self.ROBOT_NAME}/positional_control: homing has started...',
-        )
-
-        # Let the node get initialized.
-        rospy.sleep(2)
-
-        # Starting pose.
-        self.input_pose = {'gcs': self.STARTING_POSE}
-        self.set_target_pose(self.input_pose['gcs'], 'gcs')
-        self.__wait_for_motion()
-
-        rospy.loginfo_once(
-            f'/{self.ROBOT_NAME}/positional_control: homing has finished.',
-        )
-
-        self.__pid_velocity_limit(1.0)
-
-        self.is_initialized = True
-
-        rospy.loginfo_once(
-            f'\033[92m/{self.ROBOT_NAME}/positional_control: ready.\033[0m',
         )
 
     def set_target_pose(self, target_pose, coordinate_system):
@@ -416,6 +518,9 @@ def main():
         log_level=rospy.INFO,  # TODO: Make this a launch file parameter.
     )
 
+    rospy.loginfo('\n\n\n\n\n')  # Add whitespaces to separate logs.
+
+    # # ROS parameters:
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',
         default='my_gen3',
@@ -427,8 +532,6 @@ def main():
     )
 
     rospy.on_shutdown(pose_controller.node_shutdown)
-
-    pose_controller.initialization()
 
     while not rospy.is_shutdown():
         pose_controller.main_loop()

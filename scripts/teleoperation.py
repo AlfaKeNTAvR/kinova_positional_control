@@ -77,6 +77,36 @@ class KinovaTeleoperation:
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
 
+        # # Initialization and dependency status topics:
+        self.__is_initialized = False
+        self.__dependency_initialized = False
+
+        self.__node_is_initialized = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/teleoperation/is_initialized',
+            Bool,
+            queue_size=1,
+        )
+
+        self.__dependency_status = {
+            'positional_control': False,
+            'gripper_control': False,
+        }
+
+        self.__dependency_status_topics = {
+            'positional_control':
+                rospy.Subscriber(
+                    f'/{self.ROBOT_NAME}/positional_control/is_initialized',
+                    Bool,
+                    self.__positional_control_callback,
+                ),
+            'gripper_control':
+                rospy.Subscriber(
+                    f'/{self.ROBOT_NAME}/gripper_control/is_initialized',
+                    Bool,
+                    self.__gripper_control_callback,
+                ),
+        }
+
         # # Service provider:
 
         # # Service subscriber:
@@ -94,8 +124,14 @@ class KinovaTeleoperation:
         # )
 
         # # Topic publisher:
+        self.__node_is_initialized = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/teleoperation/is_initialized',
+            Bool,
+            queue_size=1,
+        )
+
         self.__kinova_pose = rospy.Publisher(
-            f'/{self.ROBOT_NAME}/input_pose',
+            f'/{self.ROBOT_NAME}/positional_control/input_pose',
             Pose,
             queue_size=1,
         )
@@ -126,6 +162,21 @@ class KinovaTeleoperation:
             Pose,
             self.__commanded_pose_callback,
         )
+
+    # # Dependency status callbacks:
+    def __positional_control_callback(self, message):
+        """Monitors positional_control is_initialized topic.
+        
+        """
+
+        self.__dependency_status['positional_control'] = message.data
+
+    def __gripper_control_callback(self, message):
+        """Monitors gripper_control is_initialized topic.
+        
+        """
+
+        self.__dependency_status['gripper_control'] = message.data
 
     # # Service handlers:
 
@@ -180,6 +231,77 @@ class KinovaTeleoperation:
         self.last_relaxed_ik_pose['orientation'][3] = message.orientation.z
 
     # # Private methods:
+    def __check_initialization(self):
+        """Monitors required criteria and sets is_initialized variable.
+
+        Monitors nodes' dependency status by checking if dependency's
+        is_initialized topic has at most one publisher (this ensures that
+        dependency node is alive and does not have any duplicates) and that it
+        publishes True. If dependency's status was True, but get_num_connections
+        is not equal to 1, this means that the connection is lost and emergency
+        actions should be performed.
+
+        Once all dependencies are initialized and additional criteria met, the
+        nodes is_initialized status changes to True. This status can change to
+        False any time to False if some criteria are no longer met.
+        
+        """
+
+        self.__dependency_initialized = True
+
+        for key in self.__dependency_status:
+            if self.__dependency_status_topics[key].get_num_connections() != 1:
+                if self.__dependency_status[key]:
+                    rospy.logerr(
+                        (
+                            f'/{self.ROBOT_NAME}/teleoperation: '
+                            f'lost connection to {key}!'
+                        )
+                    )
+
+                    # # Emergency actions on lost connection:
+                    # NOTE (optionally): Add code, which needs to be executed if
+                    # connection to any of dependencies was lost.
+
+                self.__dependency_status[key] = False
+
+            if not self.__dependency_status[key]:
+                self.__dependency_initialized = False
+
+        if not self.__dependency_initialized:
+            waiting_for = ''
+            for key in self.__dependency_status:
+                if not self.__dependency_status[key]:
+                    waiting_for += f'\n- waiting for {key}...'
+
+            rospy.logwarn_throttle(
+                15,
+                (
+                    f'/{self.ROBOT_NAME}/teleoperation:'
+                    f'{waiting_for}'
+                    # f'\nMake sure those dependencies are running properly!'
+                ),
+            )
+
+        # NOTE: Add more initialization criterea if needed.
+        if (self.__dependency_initialized):
+            if not self.__is_initialized:
+                rospy.loginfo(
+                    f'\033[92m/{self.ROBOT_NAME}/teleoperation: ready.\033[0m',
+                )
+
+                self.__is_initialized = True
+
+        else:
+            if self.__is_initialized:
+                # NOTE (optionally): Add code, which needs to be executed if the
+                # nodes's status changes from True to False.
+                pass
+
+            self.__is_initialized = False
+
+        self.__node_is_initialized.publish(self.__is_initialized)
+
     def __tracking_state_machine(self, button):
         """
         
@@ -343,6 +465,11 @@ class KinovaTeleoperation:
         
         """
 
+        self.__check_initialization()
+
+        if not self.__is_initialized:
+            return
+
         self.__tracking_state_machine(self.__tracking_button)
         self.__gripper_state_machine(self.__gripper_button)
         self.__mode_state_machine(self.__mode_button)
@@ -377,6 +504,9 @@ def main():
         log_level=rospy.INFO,  # TODO: Make this a launch file parameter.
     )
 
+    rospy.loginfo('\n\n\n\n\n')  # Add whitespaces to separate logs.
+
+    # # ROS parameters:
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',
         default='my_gen3',
@@ -399,8 +529,6 @@ def main():
     )
 
     rospy.on_shutdown(kinova_teleoperation.node_shutdown)
-
-    print(f'\n/{kinova_name}/teleoperation: ready.\n')
 
     while not rospy.is_shutdown():
         kinova_teleoperation.main_loop()

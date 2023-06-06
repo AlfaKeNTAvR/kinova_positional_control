@@ -14,12 +14,12 @@
         </include>
 
         <!-- Positional control: -->
-        <node pkg="kinova_positional_control" type="positional_control.py" name="kinova_positional_control" output="screen">
+        <node pkg="kinova_positional_control" type="positional_control.py" name="positional_control" output="screen">
             <param name="robot_name" value="$(arg robot_name)"/>
         </node>
         
         <!-- Gripper control: -->
-        <node pkg="kinova_positional_control" type="gripper_control.py" name="kinova_gripper_control" output="screen">
+        <node pkg="kinova_positional_control" type="gripper_control.py" name="gripper_control" output="screen">
             <param name="robot_name" value="$(arg robot_name)"/>
         </node>   
     </group>
