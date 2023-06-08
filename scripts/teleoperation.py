@@ -27,6 +27,7 @@ class KinovaTeleoperation:
         robot_name,
         tracking_mode,
         compensate_orientation,
+        maximum_input_change,
     ):
         """
         
@@ -43,9 +44,14 @@ class KinovaTeleoperation:
         self.ROBOT_NAME = robot_name
         self.TRACKING_MODE = tracking_mode
         self.COMPENSATE_ORIENTATION = compensate_orientation
+        self.MAXIMUM_INPUT_CHANGE = maximum_input_change
 
         # # Private variables:
         self.__input_pose = {
+            'position': np.array([0.0, 0.0, 0.0]),
+            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+        }
+        self.__last_input_pose = {
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
@@ -425,15 +431,15 @@ class KinovaTeleoperation:
             and self.__input_pose['position'][1] == 0
             and self.__input_pose['position'][2] == 0 and self.__pose_tracking
         ):
+            # Stop tracking.
             self.__tracking_state_machine_state = 0
             self.__pose_tracking = False
 
-            rospy.logerr_throttle(
-                15,
+            rospy.logerr(
                 (
                     f'/{self.ROBOT_NAME}/teleoperation: '
                     f'\n(0, 0, 0) position while active tracking! '
-                    'Tracking is stopped.'
+                    '\nStopped input tracking.'
                 ),
             )
 
@@ -447,6 +453,40 @@ class KinovaTeleoperation:
         compensated_input_pose['position'] = (
             self.__input_pose['position']
             - self.input_relaxed_ik_difference['position']
+        )
+
+        # Protection against too big positional input changes.
+        # Controller loses connection, out-of-sight, goes into a sleep mode etc.
+        input_position_difference = np.linalg.norm(
+            compensated_input_pose['position']
+            - self.__last_input_pose['position']
+        )
+
+        if (input_position_difference > self.MAXIMUM_INPUT_CHANGE):
+
+            # Stop tracking.
+            self.__tracking_state_machine_state = 0
+            self.__pose_tracking = False
+
+            rospy.logerr(
+                (
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    f'\nChange in input position exceeded maximum allowed value! '
+                    f'\n- Current input: {compensated_input_pose["position"]}'
+                    f'\n- Previous input: {self.__last_input_pose["position"]}'
+                    f'\n- Difference (absolute): {input_position_difference}'
+                    f'\n- Allowed difference threshold: {self.MAXIMUM_INPUT_CHANGE}'
+                    '\nStopped input tracking.'
+                ),
+            )
+
+            return
+
+        self.__last_input_pose['position'] = (
+            compensated_input_pose['position'].copy()
+        )
+        self.__last_input_pose['orientation'] = (
+            compensated_input_pose['orientation'].copy()
         )
 
         # Use fixed orientation.
@@ -547,6 +587,7 @@ def main():
         robot_name=kinova_name,
         tracking_mode=tracking_mode,
         compensate_orientation=compensate_orientation,
+        maximum_input_change=0.1,
     )
 
     rospy.on_shutdown(kinova_teleoperation.node_shutdown)
