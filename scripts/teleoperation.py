@@ -418,6 +418,27 @@ class KinovaTeleoperation:
         
         """
 
+        # Protection against 0, 0, 0 controller input values.
+        # Controller loses connection, goes into a sleep mode etc.
+        if (
+            self.__input_pose['position'][0] == 0
+            and self.__input_pose['position'][1] == 0
+            and self.__input_pose['position'][2] == 0 and self.__pose_tracking
+        ):
+            self.__tracking_state_machine_state = 0
+            self.__pose_tracking = False
+
+            rospy.logerr_throttle(
+                15,
+                (
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    f'\n(0, 0, 0) position while active tracking! '
+                    'Tracking is stopped.'
+                ),
+            )
+
+            return
+
         compensated_input_pose = {
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
