@@ -6,7 +6,11 @@
 import rospy
 import math
 
-from std_msgs.msg import (Float64, Bool)
+from std_msgs.msg import (
+    Float64,
+    Bool,
+)
+from std_srvs.srv import (SetBool)
 from sensor_msgs.msg import (JointState)
 
 from kortex_driver.msg import (
@@ -55,6 +59,8 @@ class KinovaJointsControl:
         # joint velocity topic.
         self.__goal_velocities = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
+        self.__pid_enabled = True
+
         # # Public variables:
         self.velocity_fraction_limit = 1.0
         self.motion_finished_threshold = 0.01
@@ -87,6 +93,12 @@ class KinovaJointsControl:
             f'/{self.ROBOT_NAME}/joints_control/velocity_limit',
             PidVelocityLimit,
             self.__pid_velocity_limit_handler,
+        )
+
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/joints_control/enable_pid',
+            SetBool,
+            self.__enable_pid_handler,
         )
 
         # # Service subscriber:
@@ -259,6 +271,25 @@ class KinovaJointsControl:
 
         return True
 
+    def __enable_pid_handler(self, request):
+        """
+        
+        """
+
+        self.__pid_enabled = request.data
+
+        rospy.logwarn(
+            (
+                f'/{self.ROBOT_NAME}/joints_control: '
+                f'pid_enabled is set to {request.data}.'
+            ),
+        )
+
+        success = True
+        message = ''
+
+        return success, message
+
     # # Topic callbacks:
     def __absolute_feedback_callback(self, msg):
         """
@@ -266,18 +297,19 @@ class KinovaJointsControl:
         """
 
         # Update from zero to the current arm position on initialization.
-        if not self.__is_initialized:
+        if not self.__is_initialized or not self.__pid_enabled:
             self.__start_absolute_positions = list(msg.position)
             self.__goal_absolute_positions = list(msg.position)
 
-            self.__dependency_status['kortex_driver'] = True
+            if not self.__is_initialized:
+                self.__dependency_status['kortex_driver'] = True
 
-            rospy.loginfo(
-                (
-                    f'/{self.ROBOT_NAME}/joints_control: '
-                    'kortex_driver was initialized!'
-                ),
-            )
+                rospy.loginfo(
+                    (
+                        f'/{self.ROBOT_NAME}/joints_control: '
+                        'kortex_driver was initialized!'
+                    ),
+                )
 
             return
 
@@ -542,7 +574,7 @@ class KinovaJointsControl:
                     )
 
             # Remove constant back and forth motion when stationary.
-            if (abs(self.__goal_velocities[joint_index]) < 0.005):
+            if (abs(self.__goal_velocities[joint_index]) < 0.0025):
                 self.__goal_velocities[joint_index] = 0.0
 
             joint_velocity.value = self.__goal_velocities[joint_index]
@@ -600,7 +632,9 @@ class KinovaJointsControl:
         self.__relative_setpoint()
 
         self.__publish_joint_motion_finished()
-        self.__publish_goal_velocities()
+
+        if self.__pid_enabled:
+            self.__publish_goal_velocities()
 
     def node_shutdown(self):
         """

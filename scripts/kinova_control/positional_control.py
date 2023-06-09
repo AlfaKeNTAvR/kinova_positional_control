@@ -9,9 +9,14 @@ import numpy as np
 import transformations
 
 from std_msgs.msg import (Bool)
+from std_srvs.srv import (SetBool)
 from geometry_msgs.msg import (Pose)
 
-# from kortex_driver.msg import (BaseCyclic_Feedback)
+from kortex_driver.msg import (
+    BaseCyclic_Feedback,
+    Twist,
+    TwistCommand,
+)
 from kortex_driver.srv import (
     Stop,
     Base_ClearFaults,
@@ -32,6 +37,7 @@ class KinovaPositionalControl:
         mounting_angles_deg=(0.0, 0.0, 0.0),
         ee_starting_position=(0.57, 0.0, 0.43),
         workspace_radius=1.2,
+        safe_homing_z=0.0,
         starting_pose={
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
@@ -78,11 +84,14 @@ class KinovaPositionalControl:
         self.WORKSPACE_CENTER = np.negative(ee_starting_position)
         self.WORKSPACE_RADIUS = workspace_radius
 
+        self.SAFE_HOMING_Z = safe_homing_z
         self.STARTING_POSE = starting_pose
 
         # # Private variables:
         self.__is_homed = False
         self.__is_motion_finished = True
+
+        self.__kinova_feedback_z = 0.0
 
         # # Public variables:
 
@@ -147,6 +156,10 @@ class KinovaPositionalControl:
             f'/{self.ROBOT_NAME}/joints_control/velocity_limit',
             PidVelocityLimit,
         )
+        self.__enable_pid = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/joints_control/enable_pid',
+            SetBool,
+        )
 
         self.__stop_arm = rospy.ServiceProxy(
             f'/{self.ROBOT_NAME}/base/stop',
@@ -169,6 +182,12 @@ class KinovaPositionalControl:
             queue_size=1,
         )
 
+        self.__kinova_cartesian_velocity = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/in/cartesian_velocity',
+            TwistCommand,
+            queue_size=1,
+        )
+
         # # Topic subscriber:
         rospy.Subscriber(
             f'/{self.ROBOT_NAME}/positional_control/input_pose',
@@ -180,6 +199,12 @@ class KinovaPositionalControl:
             f'/{self.ROBOT_NAME}/joints_control/motion_finished',
             Bool,
             self.__pid_motion_finished_callback,
+        )
+
+        rospy.Subscriber(
+            f'/{self.ROBOT_NAME}/base_feedback',
+            BaseCyclic_Feedback,
+            self.__base_feedback_callback,
         )
 
     # # Dependency status callbacks:
@@ -223,6 +248,13 @@ class KinovaPositionalControl:
             self.joint_control_initialized = True
 
         self.__is_motion_finished = msg.data
+
+    def __base_feedback_callback(self, message):
+        """
+        
+        """
+
+        self.__kinova_feedback_z = message.base.tool_pose_z
 
     # # Private methods:
     def __check_initialization(self):
@@ -367,6 +399,26 @@ class KinovaPositionalControl:
         while not self.__is_motion_finished and not rospy.is_shutdown():
             pass
 
+    def __publish_cartesian_z_velocity(self, z_velocity):
+        """
+        
+        """
+
+        twist_message = Twist()
+        twist_message.linear_x = 0.0
+        twist_message.linear_y = 0.0
+        twist_message.linear_z = z_velocity
+        twist_message.angular_x = 0.0
+        twist_message.angular_y = 0.0
+        twist_message.angular_z = 0.0
+
+        cartesian_velocity_message = TwistCommand()
+        cartesian_velocity_message.reference_frame = 0
+        cartesian_velocity_message.twist = twist_message
+        cartesian_velocity_message.duration = 0
+
+        self.__kinova_cartesian_velocity.publish(cartesian_velocity_message)
+
     def __homing(self):
         """
         
@@ -381,6 +433,22 @@ class KinovaPositionalControl:
         )
 
         self.__clear_arm_faults()
+
+        # Disable PID joints control to use kinova cartesian velocity.
+        self.__enable_pid(False)
+
+        # Move to a safe Z position before homing.
+        rospy.loginfo(
+            f'/{self.ROBOT_NAME}/positional_control: '
+            'moving to safe Z before homing...'
+        )
+
+        while self.__kinova_feedback_z < self.SAFE_HOMING_Z:
+            self.__publish_cartesian_z_velocity(0.05)
+
+        self.__publish_cartesian_z_velocity(0.0)
+        rospy.loginfo(f'/{self.ROBOT_NAME}/positional_control: at safe Z.',)
+        self.__enable_pid(True)
 
         # Limit joint velocities to 20% for homing.
         self.__pid_velocity_limit(0.2)
@@ -529,6 +597,7 @@ def main():
     pose_controller = KinovaPositionalControl(
         robot_name=kinova_name,
         workspace_radius=1.0,
+        safe_homing_z=0.43,
     )
 
     rospy.on_shutdown(pose_controller.node_shutdown)
