@@ -28,6 +28,7 @@ class KinovaTeleoperation:
         tracking_mode,
         compensate_orientation,
         maximum_input_change,
+        convenience_compensation,
     ):
         """
         
@@ -45,6 +46,7 @@ class KinovaTeleoperation:
         self.TRACKING_MODE = tracking_mode
         self.COMPENSATE_ORIENTATION = compensate_orientation
         self.MAXIMUM_INPUT_CHANGE = maximum_input_change
+        self.CONVENIENCE_COMPENSATION = convenience_compensation
 
         # # Private variables:
         self.__input_pose = {
@@ -472,10 +474,10 @@ class KinovaTeleoperation:
                 (
                     f'/{self.ROBOT_NAME}/teleoperation: '
                     f'\nChange in input position exceeded maximum allowed value! '
-                    f'\n- Current input: {compensated_input_pose["position"]}'
-                    f'\n- Previous input: {self.__last_input_pose["position"]}'
-                    f'\n- Difference (absolute): {input_position_difference}'
-                    f'\n- Allowed difference threshold: {self.MAXIMUM_INPUT_CHANGE}'
+                    f'\n- Current input: {np.round(compensated_input_pose["position"], 3)}'
+                    f'\n- Previous input: {np.round(self.__last_input_pose["position"], 3)}'
+                    f'\n- Difference (absolute): {np.round(input_position_difference, 3)}'
+                    f'\n- Allowed difference threshold: {np.round(self.MAXIMUM_INPUT_CHANGE, 3)}'
                     '\nStopped input tracking.'
                 ),
             )
@@ -505,6 +507,36 @@ class KinovaTeleoperation:
                     transformations.quaternion_multiply(
                         self.input_relaxed_ik_difference['orientation'],
                         self.__input_pose['orientation'],
+                    )
+                )
+
+            else:
+                # # Convenience orientation corrections:
+                compensated_input_pose['orientation'] = (
+                    transformations.quaternion_multiply(
+                        compensated_input_pose['orientation'],
+                        transformations.quaternion_about_axis(
+                            np.deg2rad(self.CONVENIENCE_COMPENSATION[1]),
+                            (0, 1, 0),  # Around Y.
+                        ),
+                    )
+                )
+                compensated_input_pose['orientation'] = (
+                    transformations.quaternion_multiply(
+                        compensated_input_pose['orientation'],
+                        transformations.quaternion_about_axis(
+                            np.deg2rad(self.CONVENIENCE_COMPENSATION[2]),
+                            (0, 0, 1),  # Around Z.
+                        ),
+                    )
+                )
+                compensated_input_pose['orientation'] = (
+                    transformations.quaternion_multiply(
+                        compensated_input_pose['orientation'],
+                        transformations.quaternion_about_axis(
+                            np.deg2rad(self.CONVENIENCE_COMPENSATION[0]),
+                            (1, 0, 0),  # Around X.
+                        ),
                     )
                 )
 
@@ -588,6 +620,7 @@ def main():
         tracking_mode=tracking_mode,
         compensate_orientation=compensate_orientation,
         maximum_input_change=0.1,
+        convenience_compensation=[0, 0, 0],
     )
 
     rospy.on_shutdown(kinova_teleoperation.node_shutdown)

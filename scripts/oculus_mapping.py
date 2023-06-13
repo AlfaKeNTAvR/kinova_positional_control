@@ -259,9 +259,6 @@ class OculusMapping:
                 )
             )
 
-        # # STEP 2: Comfortable orientation correction.
-        # TODO:
-
         pose_message = Pose()
         pose_message.position.x = corrected_input_pose['position'][0]
         pose_message.position.y = corrected_input_pose['position'][1]
