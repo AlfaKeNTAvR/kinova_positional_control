@@ -6,6 +6,7 @@
 import rospy
 import numpy as np
 import transformations
+import copy
 
 from std_msgs.msg import (Bool)
 from geometry_msgs.msg import (Pose)
@@ -484,12 +485,7 @@ class KinovaTeleoperation:
 
             return
 
-        self.__last_input_pose['position'] = (
-            compensated_input_pose['position'].copy()
-        )
-        self.__last_input_pose['orientation'] = (
-            compensated_input_pose['orientation'].copy()
-        )
+        self.__last_input_pose = copy.deepcopy(compensated_input_pose)
 
         # Use fixed orientation.
         compensated_input_pose['orientation'] = (

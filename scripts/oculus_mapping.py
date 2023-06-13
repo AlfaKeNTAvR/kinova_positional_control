@@ -6,6 +6,7 @@
 import rospy
 import numpy as np
 import transformations
+import copy
 
 from std_msgs.msg import (Bool)
 from geometry_msgs.msg import (Pose)
@@ -226,17 +227,7 @@ class OculusMapping:
         
         """
 
-        corrected_input_pose = {
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
-        }
-
-        corrected_input_pose['position'] = (
-            self.__input_pose['position'].copy()
-        )
-        corrected_input_pose['orientation'] = (
-            self.__input_pose['orientation'].copy()
-        )
+        corrected_input_pose = copy.deepcopy(self.__input_pose)
 
         # # STEP 1: Table or Head mode correction.
         # If the headset is located on table invert position X and Y axis,

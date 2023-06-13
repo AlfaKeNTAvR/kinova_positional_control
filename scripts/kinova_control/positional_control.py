@@ -7,6 +7,7 @@ import rospy
 import math
 import numpy as np
 import transformations
+import copy
 
 from std_msgs.msg import (Bool)
 from std_srvs.srv import (SetBool)
@@ -461,7 +462,7 @@ class KinovaPositionalControl:
         rospy.sleep(2)
 
         # Starting pose.
-        self.input_pose = {'gcs': self.STARTING_POSE}
+        self.input_pose['gcs'] = copy.deepcopy(self.STARTING_POSE)
         self.set_target_pose(self.input_pose['gcs'], 'gcs')
         self.__wait_for_motion()
 
@@ -536,8 +537,8 @@ class KinovaPositionalControl:
         #     target_pose['position']
         # )
 
-        self.last_relaxed_ik_pose['gcs'] = target_pose.copy()
-        self.last_relaxed_ik_pose['rikcs'] = target_pose.copy()
+        self.last_relaxed_ik_pose['gcs'] = copy.deepcopy(target_pose)
+        self.last_relaxed_ik_pose['rikcs'] = copy.deepcopy(target_pose)
 
         if coordinate_system == 'gcs':
             # Update target pose in Relaxed IK CS.
