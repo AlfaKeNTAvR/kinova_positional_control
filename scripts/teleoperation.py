@@ -415,10 +415,10 @@ class KinovaTeleoperation:
 
         self.input_relaxed_ik_difference['orientation'] = (
             transformations.quaternion_multiply(
-                self.last_relaxed_ik_pose['orientation'],
                 transformations.quaternion_inverse(
                     self.__input_pose['orientation']
                 ),
+                self.last_relaxed_ik_pose['orientation'],
             )
         )
 
@@ -487,7 +487,7 @@ class KinovaTeleoperation:
 
         self.__last_input_pose = copy.deepcopy(compensated_input_pose)
 
-        # Use fixed orientation.
+        # Use fixed (last commanded) orientation.
         compensated_input_pose['orientation'] = (
             self.last_relaxed_ik_pose['orientation']
         )
@@ -501,8 +501,8 @@ class KinovaTeleoperation:
             if self.COMPENSATE_ORIENTATION:
                 compensated_input_pose['orientation'] = (
                     transformations.quaternion_multiply(
-                        self.input_relaxed_ik_difference['orientation'],
                         self.__input_pose['orientation'],
+                        self.input_relaxed_ik_difference['orientation'],
                     )
                 )
 

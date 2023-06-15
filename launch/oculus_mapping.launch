@@ -3,7 +3,7 @@
     <arg name="robot_name" default="my_gen3"/>
     <arg name="tracking_mode" default="toggle"/>
     <arg name="controller_side" default="right"/>
-    <arg name="compensate_orientation" default="false"/>
+    <arg name="compensate_orientation" default="true"/>
 
     <!-- Oculus controller feedback: -->
     <include file="$(find oculus_ros)/launch/controller_feedback.launch">
