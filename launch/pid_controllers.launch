@@ -1,7 +1,8 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="robot_name" default="my_gen3"/>
     <arg name="logger_output" default="log"/>
+    <arg name="robot_name" default="my_gen3"/>
+    
 
     <!-- PID control: -->
     <group ns="/$(arg robot_name)">->

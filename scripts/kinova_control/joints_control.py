@@ -29,7 +29,7 @@ class KinovaJointsControl:
 
     def __init__(
         self,
-        robot_name='my_gen3',
+        robot_name,
         continous_joints_indices=(0, 2, 4, 6),
         max_speeds=[1.396, 1.396, 1.396, 1.396, 1.222, 1.222, 1.222],
     ):
