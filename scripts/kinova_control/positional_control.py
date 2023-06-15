@@ -8,6 +8,7 @@ import math
 import numpy as np
 import transformations
 import copy
+from ast import (literal_eval)
 
 from std_msgs.msg import (Bool)
 from std_srvs.srv import (SetBool)
@@ -34,15 +35,12 @@ class KinovaPositionalControl:
 
     def __init__(
         self,
-        robot_name='my_gen3',
-        mounting_angles_deg=(0.0, 0.0, 0.0),
-        ee_starting_position=(0.57, 0.0, 0.43),
-        workspace_radius=1.2,
-        safe_homing_z=0.0,
-        starting_pose={
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
-        },
+        robot_name,
+        mounting_angles_deg,
+        safe_homing_z,
+        starting_pose,
+        # ee_starting_position=(0.57, 0.0, 0.43),
+        # workspace_radius=1.2,
     ):
         """
         
@@ -82,11 +80,23 @@ class KinovaPositionalControl:
             self.ROTATE_GCS_TO_RIKCS
         )
 
-        self.WORKSPACE_CENTER = np.negative(ee_starting_position)
-        self.WORKSPACE_RADIUS = workspace_radius
-
         self.SAFE_HOMING_Z = safe_homing_z
         self.STARTING_POSE = starting_pose
+        self.STARTING_POSE['position'] = (
+            np.array(self.STARTING_POSE['position'])
+        )
+        self.STARTING_POSE['orientation'] = (
+            np.array(
+                transformations.quaternion_from_euler(
+                    np.deg2rad(self.STARTING_POSE['orientation'][0]),
+                    np.deg2rad(self.STARTING_POSE['orientation'][1]),
+                    np.deg2rad(self.STARTING_POSE['orientation'][2]),
+                )
+            )
+        )
+
+        # self.WORKSPACE_CENTER = np.negative(ee_starting_position)
+        # self.WORKSPACE_RADIUS = workspace_radius
 
         # # Private variables:
         self.__is_homed = False
@@ -352,43 +362,43 @@ class KinovaPositionalControl:
 
         return pose_message
 
-    def __check_boundaries(self, position):
-        """
-        
-        """
+    # def __check_boundaries(self, position):
+    #     """
 
-        # Calculate the vector from the center to the position.
-        vector_to_position = [
-            position[i] - self.WORKSPACE_CENTER[i]
-            for i in range(len(self.WORKSPACE_CENTER))
-        ]
+    #     """
 
-        # Calculate the distance from the center to the position.
-        distance_to_position = math.sqrt(
-            sum([x**2 for x in vector_to_position])
-        )
+    #     # Calculate the vector from the center to the position.
+    #     vector_to_position = [
+    #         position[i] - self.WORKSPACE_CENTER[i]
+    #         for i in range(len(self.WORKSPACE_CENTER))
+    #     ]
 
-        # If the position is inside the sphere, return its coordinates.
-        if distance_to_position <= self.WORKSPACE_RADIUS:
-            return position
+    #     # Calculate the distance from the center to the position.
+    #     distance_to_position = math.sqrt(
+    #         sum([x**2 for x in vector_to_position])
+    #     )
 
-        # Calculate the vector from the center to the closest position on the
-        # sphere surface.
-        vector_to_surface = [
-            vector_to_position[i] * self.WORKSPACE_RADIUS / distance_to_position
-            for i in range(len(self.WORKSPACE_CENTER))
-        ]
+    #     # If the position is inside the sphere, return its coordinates.
+    #     if distance_to_position <= self.WORKSPACE_RADIUS:
+    #         return position
 
-        # Calculate the coordinates of the closest position on the sphere
-        # surface.
-        closest_position = np.array(
-            [
-                self.WORKSPACE_CENTER[i] + vector_to_surface[i]
-                for i in range(len(self.WORKSPACE_CENTER))
-            ]
-        )
+    #     # Calculate the vector from the center to the closest position on the
+    #     # sphere surface.
+    #     vector_to_surface = [
+    #         vector_to_position[i] * self.WORKSPACE_RADIUS / distance_to_position
+    #         for i in range(len(self.WORKSPACE_CENTER))
+    #     ]
 
-        return closest_position
+    #     # Calculate the coordinates of the closest position on the sphere
+    #     # surface.
+    #     closest_position = np.array(
+    #         [
+    #             self.WORKSPACE_CENTER[i] + vector_to_surface[i]
+    #             for i in range(len(self.WORKSPACE_CENTER))
+    #         ]
+    #     )
+
+    #     return closest_position
 
     def __wait_for_motion(self):
         """Blocks code execution until the flag is set or a node is shut down.
@@ -546,6 +556,14 @@ class KinovaPositionalControl:
                 self.ROTATE_GCS_TO_RIKCS[0:3, 0:3],
                 target_pose['position'],
             )
+            self.last_relaxed_ik_pose['rikcs']['orientation'] = (
+                transformations.quaternion_multiply(
+                    target_pose['orientation'],
+                    transformations.quaternion_from_matrix(
+                        self.ROTATE_GCS_TO_RIKCS
+                    ),
+                ),
+            )[0]
 
         elif coordinate_system == 'rikcs':
             # Update target pose in Global IK CS.
@@ -553,6 +571,14 @@ class KinovaPositionalControl:
                 self.ROTATE_RIKCS_TO_GCS[0:3, 0:3],
                 target_pose['position'],
             )
+            self.last_relaxed_ik_pose['gcs']['orientation'] = (
+                transformations.quaternion_multiply(
+                    target_pose['orientation'],
+                    transformations.quaternion_from_matrix(
+                        self.ROTATE_RIKCS_TO_GCS
+                    ),
+                ),
+            )[0]
 
         else:
             raise ValueError('Invalid coordinate_system value.')
@@ -590,15 +616,37 @@ def main():
     rospy.loginfo('\n\n\n\n\n')  # Add whitespaces to separate logs.
 
     # # ROS parameters:
+    # TODO: Add type check.
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',
         default='my_gen3',
     )
 
+    mounting_angles_deg = literal_eval(
+        rospy.get_param(
+            param_name=f'{rospy.get_name()}/mounting_angles_deg',
+            default='[0.0, 0.0, 0.0]',
+        )
+    )
+
+    safe_homing_z = rospy.get_param(
+        param_name=f'{rospy.get_name()}/safe_homing_z',
+        default=0.0,
+    )
+
+    starting_pose = literal_eval(
+        rospy.get_param(
+            param_name=f'{rospy.get_name()}/starting_pose',
+            default=
+            "{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}"
+        )
+    )
+
     pose_controller = KinovaPositionalControl(
         robot_name=kinova_name,
-        workspace_radius=1.0,
-        safe_homing_z=0.43,
+        mounting_angles_deg=mounting_angles_deg,
+        safe_homing_z=safe_homing_z,
+        starting_pose=starting_pose,
     )
 
     rospy.on_shutdown(pose_controller.node_shutdown)

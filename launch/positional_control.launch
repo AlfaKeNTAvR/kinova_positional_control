@@ -1,6 +1,14 @@
 <?xml version="1.0"?>
 <launch>
     <arg name="robot_name" default="my_gen3"/>
+    <!-- Mounting angles [degrees]: "[0.0, 0.0, 0.0]" - on the table. -->
+    <arg name="mounting_angles_deg" default="[0.0, 0.0, 0.0]"/> 
+    <!-- Move to this Z height [meters] in Kinova CS before moving to starting position. -->
+    <arg name="safe_homing_z" default="0.4"/>
+    <!-- Starting (homing) pose in Global CS: position [meters], orientation [degrees]. -->
+    <!-- "{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}" default Kinova pose (B button). -->
+    <arg name="starting_pose" default="{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}"/>
+
 
     <!-- Joints control: -->
     <include file="$(find kinova_positional_control)/launch/joints_control.launch">
@@ -16,6 +24,9 @@
         <!-- Positional control: -->
         <node pkg="kinova_positional_control" type="positional_control.py" name="positional_control" output="screen">
             <param name="robot_name" value="$(arg robot_name)"/>
+            <param name="mounting_angles_deg" value="$(arg mounting_angles_deg)"/>
+            <param name="safe_homing_z" value="$(arg safe_homing_z)"/>
+            <param name="starting_pose" value="$(arg starting_pose)"/>
         </node>
         
         <!-- Gripper control: -->

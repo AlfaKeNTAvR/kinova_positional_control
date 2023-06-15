@@ -26,7 +26,7 @@ class KinovaGripperControl:
 
     def __init__(
         self,
-        robot_name='my_gen3',
+        robot_name,
     ):
         """
         
