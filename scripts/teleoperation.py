@@ -6,7 +6,6 @@
 import rospy
 import numpy as np
 import transformations
-import copy
 
 from std_msgs.msg import (Bool)
 from geometry_msgs.msg import (Pose)
@@ -51,10 +50,6 @@ class KinovaTeleoperation:
 
         # # Private variables:
         self.__input_pose = {
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
-        }
-        self.__last_input_pose = {
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
@@ -462,7 +457,7 @@ class KinovaTeleoperation:
         # Controller loses connection, out-of-sight, goes into a sleep mode etc.
         input_position_difference = np.linalg.norm(
             compensated_input_pose['position']
-            - self.__last_input_pose['position']
+            - self.last_relaxed_ik_pose['position']
         )
 
         if (input_position_difference > self.MAXIMUM_INPUT_CHANGE):
@@ -476,7 +471,7 @@ class KinovaTeleoperation:
                     f'/{self.ROBOT_NAME}/teleoperation: '
                     f'\nChange in input position exceeded maximum allowed value! '
                     f'\n- Current input: {np.round(compensated_input_pose["position"], 3)}'
-                    f'\n- Previous input: {np.round(self.__last_input_pose["position"], 3)}'
+                    f'\n- Previous input: {np.round(self.last_relaxed_ik_pose["position"], 3)}'
                     f'\n- Difference (absolute): {np.round(input_position_difference, 3)}'
                     f'\n- Allowed difference threshold: {np.round(self.MAXIMUM_INPUT_CHANGE, 3)}'
                     '\nStopped input tracking.'
@@ -484,8 +479,6 @@ class KinovaTeleoperation:
             )
 
             return
-
-        self.__last_input_pose = copy.deepcopy(compensated_input_pose)
 
         # Use fixed (last commanded) orientation.
         compensated_input_pose['orientation'] = (
