@@ -6,6 +6,7 @@
 import rospy
 import numpy as np
 import transformations
+from ast import (literal_eval)
 
 from std_msgs.msg import (Bool)
 from geometry_msgs.msg import (Pose)
@@ -589,6 +590,7 @@ def main():
     rospy.loginfo('\n\n\n\n\n')  # Add whitespaces to separate logs.
 
     # # ROS parameters:
+    # TODO: Add type check.
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',
         default='my_gen3',
@@ -604,12 +606,24 @@ def main():
         default=True,
     )
 
+    maximum_input_change = rospy.get_param(
+        param_name=f'{rospy.get_name()}/maximum_input_change',
+        default=0.1,
+    )
+
+    convenience_compensation = literal_eval(
+        rospy.get_param(
+            param_name=f'{rospy.get_name()}/convenience_compensation',
+            default='[0.0, 0.0, 0.0]',
+        )
+    )
+
     kinova_teleoperation = KinovaTeleoperation(
         robot_name=kinova_name,
         tracking_mode=tracking_mode,
         compensate_orientation=compensate_orientation,
-        maximum_input_change=0.1,
-        convenience_compensation=[0, 0, 0],
+        maximum_input_change=maximum_input_change,
+        convenience_compensation=convenience_compensation,
     )
 
     rospy.on_shutdown(kinova_teleoperation.node_shutdown)
