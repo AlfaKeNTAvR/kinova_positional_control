@@ -1,33 +1,68 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="robot_name" default="my_gen3"/>
-    <!-- Tracking mode: "hold" or "toggle". If "hold" mode controller tracking button -->
-    <!-- should be constantly held, in "toggle" mode - press once to track input, press -->
-    <!-- again to stop tracking. -->
-    <arg name="tracking_mode" default="toggle"/>
-    <!-- Compensate orientation: if "true" on tracking start or on mode switch -->
-    <!-- the difference between current EE orientation and the controller input -->
-    <!-- will be calculated. If "false", real controller input orientation will -->
-    <!-- be sent to the robot (less safe, can cause jumps on tracking start). -->
-    <arg name="compensate_orientation" default="true"/>
+    <!-- ============================ SETTINGS ============================= -->
+
+    <arg 
+    name="robot_name" 
+    default="my_gen3"/>
+    <!-- Tracking mode: "hold" or "toggle". If "hold" mode controller tracking
+    button should be constantly held, in "toggle" mode - press once to track
+    input, press again to stop tracking. -->
+    <arg 
+    name="tracking_mode" 
+    default="toggle"/>
+    <!-- Compensate orientation: if "true" - on tracking start or on mode switch
+    the difference between current EE orientation and the controller input will
+    be calculated. If "false", real controller input orientation will be sent to
+    the robot (less safe, can cause jumps on tracking start). -->
+    <arg 
+    name="compensate_orientation" 
+    default="true"/>
     <!-- Convenience compensation [degrees] is only used when compensate_orientation is -->
     <!-- set to "false". Allows to adjust controller input to a more comfortable -->
     <!-- orientation. -->
-    <arg name="convenience_compensation" default="[0.0, 0.0, 0.0]"/>
+    <arg 
+    name="convenience_compensation" 
+    default="[0.0, 0.0, 0.0]"/>
+
+    <!-- If any of dependency or optional subfiles should not be launched (or
+    are launched separately) set corresponding argument to "false". -->
+    <arg 
+    name="launch_positional_control" 
+    default="true"/>
+
+    <!-- ======================== END OF SETTINGS ========================== -->
 
 
-    <!-- Positional and gripper control: -->
-    <include file="$(find kinova_positional_control)/launch/positional_control.launch">
-        <arg name="robot_name" value="$(arg robot_name)"/>
-    </include>
+    <!-- Positional and gripper control (dependency): -->
+    <group if="$(arg launch_positional_control)">
+        <include 
+        file="$(find kinova_positional_control)/launch/positional_control.launch">
+            <arg 
+            name="robot_name" 
+            value="$(arg robot_name)"/>
+        </include>
+    </group>
 
     <!-- Teleoperation module: -->
     <group ns="/$(arg robot_name)">
-        <node pkg="kinova_positional_control" type="teleoperation.py" name="teleoperation" output="screen">
-            <param name="robot_name" value="$(arg robot_name)"/>
-            <param name="tracking_mode" value="$(arg tracking_mode)"/>
-            <param name="compensate_orientation" value="$(arg compensate_orientation)"/>
-            <param name="convenience_compensation" value="$(arg convenience_compensation)"/>
+        <node 
+        pkg="kinova_positional_control" 
+        type="teleoperation.py" 
+        name="teleoperation" 
+        output="screen">
+            <param 
+            name="robot_name" 
+            value="$(arg robot_name)"/>
+            <param 
+            name="tracking_mode" 
+            value="$(arg tracking_mode)"/>
+            <param 
+            name="compensate_orientation" 
+            value="$(arg compensate_orientation)"/>
+            <param 
+            name="convenience_compensation" 
+            value="$(arg convenience_compensation)"/>
         </node>   
     </group>
 </launch>

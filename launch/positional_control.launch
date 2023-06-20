@@ -1,37 +1,94 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="robot_name" default="my_gen3"/>
+    <!-- ============================ SETTINGS ============================= -->
+
+    <arg 
+    name="robot_name" 
+    default="my_gen3"/>
     <!-- Mounting angles [degrees]: "[0.0, 0.0, 0.0]" - on the table. -->
-    <arg name="mounting_angles_deg" default="[0.0, 0.0, 0.0]"/> 
-    <!-- Move to this Z height [meters] in Kinova CS before moving to starting position. -->
-    <arg name="safe_homing_z" default="0.4"/>
-    <!-- Starting (homing) pose in Global CS: position [meters], orientation [degrees]. -->
-    <!-- "{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}" default Kinova pose (B button). -->
-    <arg name="starting_pose" default="{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}"/>
+    <arg 
+    name="mounting_angles_deg" 
+    default="[0.0, -48.2, 90.0]"/> 
+    <!-- Move to this Z height [meters] in Kinova CS before moving to starting
+    position in Global CS. -->
+    <arg 
+    name="safe_homing_z" 
+    default="0.0"/>
+    <!-- Starting (homing) pose in Global CS: position X, Y, Z [meters],
+    orientation X, Y, Z [degrees]. Default Kinova homing pose (B button pose)
+    given "[0.0, 0.0, 0.0]" mounting angles: 
+    "{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}"  -->
+    <arg 
+    name="starting_pose" 
+    default="{'position': [0.25, 0.35, -0.15], 'orientation': [0.0, 0.0, 0.0]}"/>
 
+    <!-- If any of dependency or optional subfiles should not be launched (or
+    are launched separately) set corresponding argument to "false". -->
+    <arg 
+    name="launch_joints_control" 
+    default="true"/>
+    <arg 
+    name="launch_relaxed_ik" 
+    default="true"/>
+    <arg 
+    name="launch_gripper_control" 
+    default="true"/>
 
-    <!-- Joints control: -->
-    <include file="$(find kinova_positional_control)/launch/joints_control.launch">
-        <arg name="robot_name" value="$(arg robot_name)"/>
-    </include>
+    <!-- ======================== END OF SETTINGS ========================== -->
+    
+
+    <!-- Joints control (dependency): -->
+    <group if="$(arg launch_joints_control)">
+        <include 
+        file="$(find kinova_positional_control)/launch/joints_control.launch">
+            <arg 
+            name="robot_name" 
+            value="$(arg robot_name)"/>
+        </include>
+    </group>
 
     <group ns="/$(arg robot_name)">
-        <!-- Relaxed IK: -->
-        <include file="$(find relaxed_ik_ros1)/launch/relaxed_ik.launch">
-            <arg name="robot_name" value="$(arg robot_name)"/>
-        </include>
+        <!-- Relaxed IK (dependency): -->
+        <group if="$(arg launch_relaxed_ik)">
+            <include 
+            file="$(find relaxed_ik_ros1)/launch/relaxed_ik.launch">
+                <arg 
+                name="robot_name" 
+                value="$(arg robot_name)"/>
+            </include>
+        </group>
+   
+        <!-- Gripper control (optional): -->
+        <group if="$(arg launch_gripper_control)">
+            <node 
+            pkg="kinova_positional_control" 
+            type="gripper_control.py" 
+            name="gripper_control" 
+            output="screen">
+                <param 
+                name="robot_name" 
+                value="$(arg robot_name)"/>
+            </node>   
+        </group>
 
-        <!-- Positional control: -->
-        <node pkg="kinova_positional_control" type="positional_control.py" name="positional_control" output="screen">
-            <param name="robot_name" value="$(arg robot_name)"/>
-            <param name="mounting_angles_deg" value="$(arg mounting_angles_deg)"/>
-            <param name="safe_homing_z" value="$(arg safe_homing_z)"/>
-            <param name="starting_pose" value="$(arg starting_pose)"/>
-        </node>
-        
-        <!-- Gripper control: -->
-        <node pkg="kinova_positional_control" type="gripper_control.py" name="gripper_control" output="screen">
-            <param name="robot_name" value="$(arg robot_name)"/>
-        </node>   
+        <!-- Positional control: -->     
+        <node 
+        pkg="kinova_positional_control" 
+        type="positional_control.py"
+        name="positional_control" 
+        output="screen">
+            <param 
+            name="robot_name" 
+            value="$(arg robot_name)"/>
+            <param 
+            name="mounting_angles_deg" 
+            value="$(arg mounting_angles_deg)"/>
+            <param 
+            name="safe_homing_z" 
+            value="$(arg safe_homing_z)"/>
+            <param 
+            name="starting_pose" 
+            value="$(arg starting_pose)"/>
+        </node>     
     </group>
 </launch>

@@ -1,7 +1,11 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="logger_output" default="log"/>
+    <!-- ============================ SETTINGS ============================= -->
+
     <arg name="robot_name" default="my_gen3"/>
+    <arg name="logger_output" default="log"/>
+
+    <!-- ======================== END OF SETTINGS ========================== -->
     
 
     <!-- PID control: -->

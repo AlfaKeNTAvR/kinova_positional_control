@@ -1,17 +1,40 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="robot_name" default="my_gen3"/>
+    <!-- ============================ SETTINGS ============================= -->
+
+    <arg 
+    name="robot_name" 
+    default="my_gen3"/>
+
+    <!-- If any of dependency or optional subfiles should not be launched (or
+    are launched separately) set corresponding argument to "false". -->
+    <arg 
+    name="launch_pid_controllers" 
+    default="true"/>
+
+    <!-- ======================== END OF SETTINGS ========================== -->
 
 
-    <!-- PID control: -->
-    <include file="$(find kinova_positional_control)/launch/pid_controllers.launch">
-      <arg name="robot_name" value="$(arg robot_name)"/>
-    </include>
+    <!-- PID controllers (dependency): -->
+    <group if="$(arg launch_pid_controllers)">
+      <include 
+      file="$(find kinova_positional_control)/launch/pid_controllers.launch">
+        <arg 
+        name="robot_name" 
+        value="$(arg robot_name)"/>
+      </include>
+    </group>
 
     <!-- Joints control: -->
     <group ns="/$(arg robot_name)">
-      <node name="joints_control" pkg="kinova_positional_control" type="joints_control.py" output="screen">
-        <param name="robot_name" value="$(arg robot_name)"/>
+      <node 
+      name="joints_control" 
+      pkg="kinova_positional_control" 
+      type="joints_control.py" 
+      output="screen">
+        <param 
+        name="robot_name" 
+        value="$(arg robot_name)"/>
       </node>
     </group>
 </launch>
