@@ -558,14 +558,19 @@ class KinovaPositionalControl:
             )
             self.last_relaxed_ik_pose['rikcs']['orientation'] = (
                 transformations.quaternion_multiply(
-                    target_pose['orientation'],
                     transformations.quaternion_from_matrix(
                         self.ROTATE_GCS_TO_RIKCS
                     ),
+                    target_pose['orientation'],
                 ),
             )[0]
 
+        # TODO: Test this segment.
         elif coordinate_system == 'rikcs':
+            raise ValueError(
+                'Setting target orientation in RIKCS was not tested yet.'
+            )
+
             # Update target pose in Global IK CS.
             self.last_relaxed_ik_pose['gcs']['position'] = np.matmul(
                 self.ROTATE_RIKCS_TO_GCS[0:3, 0:3],
@@ -573,10 +578,10 @@ class KinovaPositionalControl:
             )
             self.last_relaxed_ik_pose['gcs']['orientation'] = (
                 transformations.quaternion_multiply(
-                    target_pose['orientation'],
                     transformations.quaternion_from_matrix(
                         self.ROTATE_RIKCS_TO_GCS
                     ),
+                    target_pose['orientation'],
                 ),
             )[0]
 
