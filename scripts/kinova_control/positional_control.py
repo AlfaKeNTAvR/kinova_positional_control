@@ -102,8 +102,6 @@ class KinovaPositionalControl:
         self.__is_homed = False
         self.__is_motion_finished = True
 
-        self.__kinova_feedback_z = 0.0
-
         # # Public variables:
 
         # Input pose in Global and Relaxed IK coordinate systems.
@@ -130,9 +128,30 @@ class KinovaPositionalControl:
                 }
         }
 
+        # Pose, which is received directly from Kinova feedback.
+        self.kinova_feedback_pose = {
+            'kcs':
+                {
+                    'position': np.array([0.0, 0.0, 0.0]),
+                    # 'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+                },
+            'rikcs':
+                {
+                    'position': np.array([0.0, 0.0, 0.0]),
+                    # 'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+                },
+        }
+
+        # Difference between kinova and relaxed_ik CS origins on start up.
+        self.kcs_rikcs_difference = {
+            'position': np.array([0.0, 0.0, 0.0]),
+            # 'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+        }
+
         # # Initialization and dependency status topics:
         self.__is_initialized = False
         self.__dependency_initialized = False
+        self.__kcs_rikcs_difference_calculated = False
 
         self.__node_is_initialized = rospy.Publisher(
             f'/{self.ROBOT_NAME}/positional_control/is_initialized',
@@ -196,6 +215,12 @@ class KinovaPositionalControl:
         self.__kinova_cartesian_velocity = rospy.Publisher(
             f'/{self.ROBOT_NAME}/in/cartesian_velocity',
             TwistCommand,
+            queue_size=1,
+        )
+
+        self.__motion_finished = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/positional_control/motion_finished',
+            Bool,
             queue_size=1,
         )
 
@@ -267,6 +292,22 @@ class KinovaPositionalControl:
 
         self.__kinova_feedback_z = message.base.tool_pose_z
 
+        self.kinova_feedback_pose['kcs']['position'][0] = (
+            message.base.tool_pose_x
+        )
+        self.kinova_feedback_pose['kcs']['position'][1] = (
+            message.base.tool_pose_y
+        )
+        self.kinova_feedback_pose['kcs']['position'][2] = (
+            message.base.tool_pose_z
+        )
+
+        if self.__kcs_rikcs_difference_calculated:
+            self.kinova_feedback_pose['rikcs']['position'] = (
+                self.kinova_feedback_pose['kcs']['position']
+                - self.kcs_rikcs_difference['position']
+            )
+
     # # Private methods:
     def __check_initialization(self):
         """Monitors required criteria and sets is_initialized variable.
@@ -320,8 +361,26 @@ class KinovaPositionalControl:
                 ),
             )
 
+        # If feedback from kortex_driver (implied by joints_control is
+        # initialized) and relaxed IK was received and the robot is at home
+        # position - once calculate difference between KCS and RIKCS.
+        if (
+            not self.__kcs_rikcs_difference_calculated and self.__is_homed
+            and self.__dependency_status['relaxed_ik']
+            and self.__dependency_status['joints_control']
+        ):
+            self.kcs_rikcs_difference['position'] = (
+                self.kinova_feedback_pose['kcs']['position']
+                - self.last_relaxed_ik_pose['rikcs']['position']
+            )
+
+            self.__kcs_rikcs_difference_calculated = True
+
         # NOTE: Add more initialization criterea if needed.
-        if (self.__dependency_initialized and self.__is_homed):
+        if (
+            self.__dependency_initialized and self.__is_homed
+            and self.__kcs_rikcs_difference_calculated
+        ):
             if not self.__is_initialized:
                 rospy.loginfo(
                     f'\033[92m/{self.ROBOT_NAME}/positional_control: ready.\033[0m',
@@ -454,7 +513,9 @@ class KinovaPositionalControl:
             'moving to safe Z before homing...'
         )
 
-        while self.__kinova_feedback_z < self.SAFE_HOMING_Z:
+        while (
+            self.kinova_feedback_pose['kcs']['position'][2] < self.SAFE_HOMING_Z
+        ):
             self.__publish_cartesian_z_velocity(0.05)
 
         self.__publish_cartesian_z_velocity(0.0)
@@ -484,6 +545,38 @@ class KinovaPositionalControl:
 
         self.__is_homed = True
 
+    def __publish_pose_motion_finished(self):
+        """
+        
+        """
+
+        motion_finished = True
+
+        if (
+            (
+                round(
+                    self.last_relaxed_ik_pose['rikcs']['position'][0]
+                    - self.kinova_feedback_pose['rikcs']['position'][0],
+                    2,
+                ) > 0.01
+            ) or (
+                round(
+                    self.last_relaxed_ik_pose['rikcs']['position'][1]
+                    - self.kinova_feedback_pose['rikcs']['position'][1],
+                    2,
+                ) > 0.01
+            ) or (
+                round(
+                    self.last_relaxed_ik_pose['rikcs']['position'][2]
+                    - self.kinova_feedback_pose['rikcs']['position'][2],
+                    2,
+                ) > 0.02
+            )
+        ):
+            motion_finished = False
+
+        self.__motion_finished.publish(motion_finished)
+
     # # Public methods:
     def main_loop(self):
         """
@@ -504,6 +597,8 @@ class KinovaPositionalControl:
         self.__relaxed_ik_commanded_gcs.publish(
             self.__compose_pose_message(self.last_relaxed_ik_pose['gcs'])
         )
+
+        self.__publish_pose_motion_finished()
 
     def node_shutdown(self):
         """
