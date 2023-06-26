@@ -1,5 +1,11 @@
 #!/usr/bin/env python
-"""
+"""Implements Kinova Gen3 positional control module.
+
+TODO: Add detailed description.
+
+Author (s):
+    1. Nikita Boguslavskii (bognik3@gmail.com), Human-Inspired Robotics (HiRo)
+       lab, Worcester Polytechnic Institute (WPI), 2023.
 
 """
 
