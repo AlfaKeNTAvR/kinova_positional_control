@@ -24,6 +24,13 @@
     <arg 
     name="convenience_compensation" 
     default="[0.0, 0.0, 0.0]"/>
+    <!-- Maximum allowed change between the current input posisition and
+    previous commanded position [meters]. Protects against too big input change
+    within one control loop cycle (~750Hz). The value should be selected
+    experimentally given an input device and desired control sensitivity. -->
+    <arg
+    name="maximum_input_change"
+    default="0.1"/>
 
     <!-- If any of dependency or optional subfiles should not be launched (or
     are launched separately) set corresponding argument to "false". -->
@@ -63,6 +70,9 @@
             <param 
             name="convenience_compensation" 
             value="$(arg convenience_compensation)"/>
+            <param
+            name="maximum_input_change"
+            value="$(arg maximum_input_change)"/>
         </node>   
     </group>
 </launch>
