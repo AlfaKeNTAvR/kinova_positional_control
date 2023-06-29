@@ -20,6 +20,7 @@ from kortex_driver.msg import (
 )
 from kortex_driver.srv import (SendGripperCommand)
 from kinova_positional_control.srv import (
+    GripperVelocity,
     GripperPosition,
     GripperForceGrasping,
 )
@@ -66,6 +67,11 @@ class KinovaGripperControl:
 
         # # Service provider:
         rospy.Service(
+            f'/{self.ROBOT_NAME}/gripper/velocity',
+            GripperVelocity,
+            self.__gripper_velocity_handler,
+        )
+        rospy.Service(
             f'/{self.ROBOT_NAME}/gripper/position',
             GripperPosition,
             self.__gripper_position_handler,
@@ -94,6 +100,30 @@ class KinovaGripperControl:
     # # Dependency status callbacks:
 
     # # Service handlers:
+    def __gripper_velocity_handler(self, request):
+        """
+
+        """
+
+        self.__activate_force_grasping = False
+
+        gripper_velocity = request.velocity
+
+        if gripper_velocity < -1.0:
+            gripper_velocity = -1.0
+
+        if gripper_velocity > 1.0:
+            gripper_velocity = 1.0
+
+        self.__gripper_control(
+            mode=2,
+            value=gripper_velocity,
+        )
+
+        response = True
+
+        return response
+
     def __gripper_position_handler(self, request):
         """
 
