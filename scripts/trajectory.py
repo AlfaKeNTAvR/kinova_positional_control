@@ -177,35 +177,9 @@ class KinovaTrajectory:
         self.__trajectory = []
 
         # Append current Kinova position as a first trajectory waypoint.
-        trajectory_waypoint = {
-            'pose':
-                {
-                    'position':
-                        np.array(
-                            [
-                                self.__last_relaxed_ik_pose['position'][0],
-                                self.__last_relaxed_ik_pose['position'][1],
-                                self.__last_relaxed_ik_pose['position'][2],
-                            ]
-                        ),
-                    'orientation':
-                        np.array(
-                            [
-                                self.__last_relaxed_ik_pose['orientation'][0],
-                                self.__last_relaxed_ik_pose['orientation'][1],
-                                self.__last_relaxed_ik_pose['orientation'][2],
-                                self.__last_relaxed_ik_pose['orientation'][3],
-                            ]
-                        ),
-                },
-            'point_lin_prc': 0.0,
-            'point_ang_prc': 0.0,
-            'path_lin_prc': 0.0,
-            'path_ang_prc': 0.0,
-            'speed_frac': 0.0,
-        }
+        current_pose_waypoint = self.__get_current_pose_waypoint()
 
-        self.__trajectory.append(trajectory_waypoint)
+        self.__trajectory.append(current_pose_waypoint)
 
         # Parse waypoint array.
         for waypoint in request.trajectory.waypoints:
@@ -285,39 +259,7 @@ class KinovaTrajectory:
         """
 
         if self.__trajectory:
-            self.__resume_trajectory = False
-
-            self.__trajectory[0] = {
-                'pose':
-                    {
-                        'position':
-                            np.array(
-                                [
-                                    self.__last_relaxed_ik_pose['position'][0],
-                                    self.__last_relaxed_ik_pose['position'][1],
-                                    self.__last_relaxed_ik_pose['position'][2],
-                                ]
-                            ),
-                        'orientation':
-                            np.array(
-                                [
-                                    self.__last_relaxed_ik_pose['orientation']
-                                    [0],
-                                    self.__last_relaxed_ik_pose['orientation']
-                                    [1],
-                                    self.__last_relaxed_ik_pose['orientation']
-                                    [2],
-                                    self.__last_relaxed_ik_pose['orientation']
-                                    [3],
-                                ]
-                            ),
-                    },
-                'point_lin_prc': 0.0,
-                'point_ang_prc': 0.0,
-                'path_lin_prc': 0.0,
-                'path_ang_prc': 0.0,
-                'speed_frac': 0.0,
-            }
+            self.__trajectory[0] = self.__get_current_pose_waypoint()
 
             # Reset trajectory sampler and executor.
             self.__motion_is_sampled = False
@@ -436,6 +378,41 @@ class KinovaTrajectory:
             self.__is_initialized = False
 
         self.__node_is_initialized.publish(self.__is_initialized)
+
+    def __get_current_pose_waypoint(self):
+        """
+        
+        """
+
+        current_pose_waypoint = {
+            'pose':
+                {
+                    'position':
+                        np.array(
+                            [
+                                self.__last_relaxed_ik_pose['position'][0],
+                                self.__last_relaxed_ik_pose['position'][1],
+                                self.__last_relaxed_ik_pose['position'][2],
+                            ]
+                        ),
+                    'orientation':
+                        np.array(
+                            [
+                                self.__last_relaxed_ik_pose['orientation'][0],
+                                self.__last_relaxed_ik_pose['orientation'][1],
+                                self.__last_relaxed_ik_pose['orientation'][2],
+                                self.__last_relaxed_ik_pose['orientation'][3],
+                            ]
+                        ),
+                },
+            'point_lin_prc': 0.0,
+            'point_ang_prc': 0.0,
+            'path_lin_prc': 0.0,
+            'path_ang_prc': 0.0,
+            'speed_frac': 0.0,
+        }
+
+        return current_pose_waypoint
 
     def __sample_motion(self):
         """
