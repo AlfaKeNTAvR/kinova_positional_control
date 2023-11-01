@@ -1,0 +1,6 @@
+geometry_msgs/Pose pose
+float64 point_lin_prc
+float64 point_ang_prc
+float64 path_lin_prc
+float64 path_ang_prc
+float64 speed_frac

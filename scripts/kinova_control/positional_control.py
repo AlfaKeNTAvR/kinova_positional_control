@@ -154,7 +154,7 @@ class KinovaPositionalControl:
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
 
-        # Linear missalignment between Kinova and Relaxed IK.
+        # Missalignment between Kinova and Relaxed IK.
         self.kinova_relaxed_ik_missalignment = {
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
