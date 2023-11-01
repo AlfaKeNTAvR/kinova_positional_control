@@ -258,6 +258,17 @@ class KinovaTrajectory:
         
         """
 
+        success = False
+        message = 'Error: Trajectory is not loaded.'
+
+        # Protection against the robot moving to a point with waypoint_index = 0
+        # and sample_index = 0.
+        if self.__resume_trajectory:
+            success = False
+            message = 'Error: Pause the trajectory before canceling.'
+
+            return success, message
+
         if self.__trajectory:
             self.__trajectory[0] = self.__get_current_pose_waypoint()
 
