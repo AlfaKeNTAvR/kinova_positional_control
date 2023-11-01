@@ -1,3 +1,4 @@
+string coordinate_system
 WaypointArray trajectory
 ---
 bool response

@@ -49,6 +49,7 @@ class KinovaTrajectory:
         self.__sample_index = 0
         self.__trajectory_is_finished = True
         self.__trajectory = []
+        self.__coordinate_system = 'gcs'
 
         self.__loop_frequency = copy(self.MIN_LOOP_FREQUENCY)
 
@@ -78,6 +79,16 @@ class KinovaTrajectory:
         }
 
         self.__last_relaxed_ik_pose = {
+            'position': np.array([0.0, 0.0, 0.0]),
+            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+        }
+
+        # End-Effector Corrdinate System:
+        self.__gcs_to_eecs = transformations.quaternion_matrix(
+            np.array([1, 0, 0, 0])
+        )
+        self.__eecs_to_gcs = transformations.inverse_matrix(self.__gcs_to_eecs)
+        self.__eecs_origin = {
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
@@ -173,8 +184,24 @@ class KinovaTrajectory:
         """
 
         self.__resume_trajectory = False
+        self.__trajectory_is_finished = True
 
         self.__trajectory = []
+        self.__coordinate_system = request.coordinate_system
+
+        if self.__coordinate_system not in ['gcs', 'eecs']:
+            response = False
+
+            return response
+
+        if self.__coordinate_system == 'eecs':
+            self.__eecs_to_gcs = transformations.quaternion_matrix(
+                self.__last_relaxed_ik_pose['orientation']
+            )
+            self.__gcs_to_eecs = transformations.inverse_matrix(
+                self.__eecs_to_gcs
+            )
+            self.__eecs_origin = copy(self.__last_relaxed_ik_pose)
 
         # Append current Kinova position as a first trajectory waypoint.
         current_pose_waypoint = self.__get_current_pose_waypoint()
@@ -210,6 +237,20 @@ class KinovaTrajectory:
                 'path_ang_prc': waypoint.path_ang_prc,
                 'speed_frac': waypoint.speed_frac,
             }
+
+            if self.__coordinate_system == 'eecs':
+                trajectory_waypoint['pose']['position'] = (
+                    self.__eecs_origin['position'] + np.matmul(
+                        self.__eecs_to_gcs[0:3, 0:3],
+                        trajectory_waypoint['pose']['position'],
+                    )
+                )
+                trajectory_waypoint['pose']['orientation'] = (
+                    transformations.quaternion_multiply(
+                        self.__eecs_origin['orientation'],
+                        trajectory_waypoint['pose']['orientation'],
+                    )
+                )
 
             self.__trajectory.append(trajectory_waypoint)
 
@@ -270,6 +311,7 @@ class KinovaTrajectory:
             return success, message
 
         if self.__trajectory:
+            self.__trajectory_is_finished = True
             self.__trajectory[0] = self.__get_current_pose_waypoint()
 
             # Reset trajectory sampler and executor.
@@ -370,6 +412,11 @@ class KinovaTrajectory:
                     # f'\nMake sure those dependencies are running properly!'
                 ),
             )
+
+            # Reset trajectory sampler and executor.
+            self.__motion_is_sampled = False
+            self.__waypoint_index = 0
+            self.__sample_index = 0
 
         # NOTE: Add more initialization criterea if needed.
         if (self.__dependency_initialized):
@@ -566,24 +613,37 @@ class KinovaTrajectory:
 
         # Calculate linear and angular differences between Relaxed IK and Kinova
         # using position and quaternion misalignment:
-        linear_difference = np.linalg.norm(
-            self.__kinova_relaxed_ik_missalignment['position']
+        linear_difference = round(
+            np.linalg.norm(self.__kinova_relaxed_ik_missalignment['position']),
+            2,
         )
-        angular_difference = np.rad2deg(
-            2 * np.arctan2(
-                np.linalg.norm(
-                    self.__kinova_relaxed_ik_missalignment['orientation'][1:4]
-                ),
-                self.__kinova_relaxed_ik_missalignment['orientation'][0],
-            )
+        angular_difference = round(
+            np.rad2deg(
+                2 * np.arctan2(
+                    np.linalg.norm(
+                        self.__kinova_relaxed_ik_missalignment['orientation']
+                        [1:4]
+                    ),
+                    self.__kinova_relaxed_ik_missalignment['orientation'][0],
+                )
+            ),
+            2,
+        )
+
+        if angular_difference > 180:
+            angular_difference = 360 - angular_difference
+
+        print(
+            f'Linear difference: {linear_difference}\n'
+            f'Angular difference: {angular_difference}\n'
         )
 
         # Current sample is the final sample.
         if self.__sample_index == self.__num_samples - 1:
             # Final sample was reached.
             if (
-                abs(linear_difference) < self.__point_precision['linear']
-                and abs(angular_difference) < self.__point_precision['angular']
+                abs(linear_difference) <= self.__point_precision['linear']
+                and abs(angular_difference) <= self.__point_precision['angular']
             ):
                 self.__motion_is_sampled = False
 
@@ -592,8 +652,8 @@ class KinovaTrajectory:
         else:
             # Intermidiate sample was reached.
             if (
-                abs(linear_difference) < self.__path_precision['linear']
-                and abs(angular_difference) < self.__path_precision['angular']
+                abs(linear_difference) <= self.__path_precision['linear']
+                and abs(angular_difference) <= self.__path_precision['angular']
             ):
                 self.__sample_index += 1
 
