@@ -139,25 +139,30 @@ class KinovaPositionalControl:
             'kcs':
                 {
                     'position': np.array([0.0, 0.0, 0.0]),
-                    # 'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 },
             'rikcs':
                 {
                     'position': np.array([0.0, 0.0, 0.0]),
-                    # 'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 },
         }
 
         # Difference between kinova and relaxed_ik CS origins on start up.
         self.kcs_rikcs_difference = {
             'position': np.array([0.0, 0.0, 0.0]),
-            # 'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+        }
+
+        # Linear missalignment between Kinova and Relaxed IK.
+        self.kinova_relaxed_ik_missalignment = {
+            'position': np.array([0.0, 0.0, 0.0]),
+            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
 
         # # Initialization and dependency status topics:
         self.__is_initialized = False
         self.__dependency_initialized = False
-        self.__kcs_rikcs_difference_calculated = False
 
         self.__node_is_initialized = rospy.Publisher(
             f'/{self.ROBOT_NAME}/positional_control/is_initialized',
@@ -224,9 +229,9 @@ class KinovaPositionalControl:
             queue_size=1,
         )
 
-        self.__motion_finished = rospy.Publisher(
-            f'/{self.ROBOT_NAME}/positional_control/motion_finished',
-            Bool,
+        self.__kinova_relaxed_ik_missalignment = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/positional_control/kinova_relaxed_ik_missalignment',
+            Pose,
             queue_size=1,
         )
 
@@ -298,20 +303,32 @@ class KinovaPositionalControl:
 
         self.__kinova_feedback_z = message.base.tool_pose_z
 
-        self.kinova_feedback_pose['kcs']['position'][0] = (
-            message.base.tool_pose_x
-        )
-        self.kinova_feedback_pose['kcs']['position'][1] = (
-            message.base.tool_pose_y
-        )
-        self.kinova_feedback_pose['kcs']['position'][2] = (
-            message.base.tool_pose_z
+        self.kinova_feedback_pose['kcs']['position'] = np.array(
+            [
+                message.base.tool_pose_x,
+                message.base.tool_pose_y,
+                message.base.tool_pose_z,
+            ]
         )
 
-        if self.__kcs_rikcs_difference_calculated:
+        self.kinova_feedback_pose['kcs']['orientation'] = (
+            transformations.quaternion_from_euler(
+                np.deg2rad(message.base.tool_pose_theta_x),
+                np.deg2rad(message.base.tool_pose_theta_y),
+                np.deg2rad(message.base.tool_pose_theta_z),
+            )
+        )
+
+        if self.__is_homed:
             self.kinova_feedback_pose['rikcs']['position'] = (
                 self.kinova_feedback_pose['kcs']['position']
                 - self.kcs_rikcs_difference['position']
+            )
+            self.kinova_feedback_pose['rikcs']['orientation'] = (
+                transformations.quaternion_multiply(
+                    self.kinova_feedback_pose['kcs']['orientation'],
+                    self.kcs_rikcs_difference['orientation'],
+                )
             )
 
     # # Private methods:
@@ -367,26 +384,8 @@ class KinovaPositionalControl:
                 ),
             )
 
-        # If feedback from kortex_driver (implied by joints_control is
-        # initialized) and relaxed IK was received and the robot is at home
-        # position - once calculate difference between KCS and RIKCS.
-        if (
-            not self.__kcs_rikcs_difference_calculated and self.__is_homed
-            and self.__dependency_status['relaxed_ik']
-            and self.__dependency_status['joints_control']
-        ):
-            self.kcs_rikcs_difference['position'] = (
-                self.kinova_feedback_pose['kcs']['position']
-                - self.last_relaxed_ik_pose['rikcs']['position']
-            )
-
-            self.__kcs_rikcs_difference_calculated = True
-
         # NOTE: Add more initialization criterea if needed.
-        if (
-            self.__dependency_initialized and self.__is_homed
-            and self.__kcs_rikcs_difference_calculated
-        ):
+        if (self.__dependency_initialized and self.__is_homed):
             if not self.__is_initialized:
                 rospy.loginfo(
                     f'\033[92m/{self.ROBOT_NAME}/positional_control: ready.\033[0m',
@@ -540,7 +539,7 @@ class KinovaPositionalControl:
 
         # Starting pose.
         self.input_pose['gcs'] = copy.deepcopy(self.STARTING_POSE)
-        self.set_target_pose(self.input_pose['gcs'], 'gcs')
+        self.__set_target_pose(self.input_pose['gcs'], 'gcs')
         self.__wait_for_motion()
 
         rospy.loginfo(
@@ -549,80 +548,23 @@ class KinovaPositionalControl:
 
         self.__pid_velocity_limit(1.0)
 
+        # Calculate Kinova to Relaxed IK misalignment.
+        self.kcs_rikcs_difference['position'] = (
+            self.kinova_feedback_pose['kcs']['position']
+            - self.last_relaxed_ik_pose['rikcs']['position']
+        )
+        self.kcs_rikcs_difference['orientation'] = (
+            transformations.quaternion_multiply(
+                transformations.quaternion_inverse(
+                    self.kinova_feedback_pose['kcs']['orientation']
+                ),
+                self.last_relaxed_ik_pose['rikcs']['orientation'],
+            )
+        )
+
         self.__is_homed = True
 
-    def __publish_pose_motion_finished(self):
-        """
-        
-        """
-
-        motion_finished = True
-
-        if (
-            (
-                round(
-                    self.last_relaxed_ik_pose['rikcs']['position'][0]
-                    - self.kinova_feedback_pose['rikcs']['position'][0],
-                    2,
-                ) > 0.01
-            ) or (
-                round(
-                    self.last_relaxed_ik_pose['rikcs']['position'][1]
-                    - self.kinova_feedback_pose['rikcs']['position'][1],
-                    2,
-                ) > 0.01
-            ) or (
-                round(
-                    self.last_relaxed_ik_pose['rikcs']['position'][2]
-                    - self.kinova_feedback_pose['rikcs']['position'][2],
-                    2,
-                ) > 0.02
-            )
-        ):
-            motion_finished = False
-
-        self.__motion_finished.publish(motion_finished)
-
-    # # Public methods:
-    def main_loop(self):
-        """
-        
-        """
-
-        self.__check_initialization()
-
-        if not self.__is_homed:
-            self.__homing()
-
-        if not self.__is_initialized:
-            return
-
-        self.set_target_pose(self.input_pose['gcs'], 'gcs')
-
-        # Publish a commanded target position in Global CS.
-        self.__relaxed_ik_commanded_gcs.publish(
-            self.__compose_pose_message(self.last_relaxed_ik_pose['gcs'])
-        )
-
-        self.__publish_pose_motion_finished()
-
-    def node_shutdown(self):
-        """
-        
-        """
-
-        rospy.loginfo_once(
-            f'/{self.ROBOT_NAME}/positional_control: node is shutting down...',
-        )
-
-        # Stop the arm motion.
-        self.__stop_arm()
-
-        rospy.loginfo_once(
-            f'/{self.ROBOT_NAME}/positional_control: node has shut down.',
-        )
-
-    def set_target_pose(self, target_pose, coordinate_system):
+    def __set_target_pose(self, target_pose, coordinate_system):
         """
         target_pose: dict
             'position': np.array([0.0, 0.0, 0.0]),
@@ -707,6 +649,90 @@ class KinovaPositionalControl:
         ee_pose_goals.header.seq = 0
 
         self.__relaxed_ik_target_rikcs.publish(ee_pose_goals)
+
+    def __publish_kinova_relaxed_ik_missalignment(self):
+        """
+        
+        """
+
+        self.kinova_relaxed_ik_missalignment['position'] = np.round(
+            self.last_relaxed_ik_pose['rikcs']['position']
+            - self.kinova_feedback_pose['rikcs']['position'],
+            3,
+        )
+        self.kinova_relaxed_ik_missalignment['orientation'] = np.round(
+            transformations.quaternion_multiply(
+                transformations.quaternion_inverse(
+                    self.last_relaxed_ik_pose['rikcs']['orientation']
+                ),
+                self.kinova_feedback_pose['rikcs']['orientation'],
+            ),
+            3,
+        )
+
+        pose_message = Pose()
+        pose_message.position.x = (
+            self.kinova_relaxed_ik_missalignment['position'][0]
+        )
+        pose_message.position.y = (
+            self.kinova_relaxed_ik_missalignment['position'][1]
+        )
+        pose_message.position.z = (
+            self.kinova_relaxed_ik_missalignment['position'][2]
+        )
+        pose_message.orientation.w = (
+            self.kinova_relaxed_ik_missalignment['orientation'][0]
+        )
+        pose_message.orientation.x = (
+            self.kinova_relaxed_ik_missalignment['orientation'][1]
+        )
+        pose_message.orientation.y = (
+            self.kinova_relaxed_ik_missalignment['orientation'][2]
+        )
+        pose_message.orientation.z = (
+            self.kinova_relaxed_ik_missalignment['orientation'][3]
+        )
+
+        self.__kinova_relaxed_ik_missalignment.publish(pose_message)
+
+    # # Public methods:
+    def main_loop(self):
+        """
+        
+        """
+
+        self.__check_initialization()
+
+        if not self.__is_homed:
+            self.__homing()
+
+        if not self.__is_initialized:
+            return
+
+        self.__set_target_pose(self.input_pose['gcs'], 'gcs')
+
+        # Publish a commanded target position in Global CS.
+        self.__relaxed_ik_commanded_gcs.publish(
+            self.__compose_pose_message(self.last_relaxed_ik_pose['gcs'])
+        )
+
+        self.__publish_kinova_relaxed_ik_missalignment()
+
+    def node_shutdown(self):
+        """
+        
+        """
+
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/positional_control: node is shutting down...',
+        )
+
+        # Stop the arm motion.
+        self.__stop_arm()
+
+        rospy.loginfo_once(
+            f'/{self.ROBOT_NAME}/positional_control: node has shut down.',
+        )
 
 
 def main():
