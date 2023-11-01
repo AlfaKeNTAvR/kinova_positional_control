@@ -493,6 +493,12 @@ class KinovaTrajectory:
             orientation_path_duration,
         )
 
+        # Protection against almost identical poses in trajectoty, which cannot
+        # be sampled because of too small distance difference.
+        if self.__path_duration < 0.1:
+            self.__waypoint_index += 1
+            return
+
         self.__num_samples = int(self.__loop_frequency * self.__path_duration)
         self.__t = np.linspace(0, self.__path_duration, self.__num_samples)
 
