@@ -98,7 +98,7 @@ class KinovaTrajectory:
         self.__dependency_initialized = False
 
         self.__node_is_initialized = rospy.Publisher(
-            f'/{self.ROBOT_NAME}{self.NODE_NAME}/is_initialized',
+            f'{self.NODE_NAME}/is_initialized',
             Bool,
             queue_size=1,
         )
@@ -121,22 +121,22 @@ class KinovaTrajectory:
 
         # # Service provider:
         rospy.Service(
-            f'/{self.ROBOT_NAME}{self.NODE_NAME}/upload_trajectory',
+            f'{self.NODE_NAME}/upload_trajectory',
             UploadTrajectory,
             self.__upload_trajectory_handler,
         )
         rospy.Service(
-            f'/{self.ROBOT_NAME}{self.NODE_NAME}/resume_trajectory',
+            f'{self.NODE_NAME}/resume_trajectory',
             Trigger,
             self.__resume_trajectory_handler,
         )
         rospy.Service(
-            f'/{self.ROBOT_NAME}{self.NODE_NAME}/pause_trajectory',
+            f'{self.NODE_NAME}/pause_trajectory',
             Trigger,
             self.__pause_trajectory_handler,
         )
         rospy.Service(
-            f'/{self.ROBOT_NAME}{self.NODE_NAME}/cancel_trajectory',
+            f'{self.NODE_NAME}/cancel_trajectory',
             Trigger,
             self.__cancel_trajectory_handler,
         )
@@ -150,7 +150,7 @@ class KinovaTrajectory:
             queue_size=1,
         )
         self.__trajectory_finished = rospy.Publisher(
-            f'/{self.ROBOT_NAME}{self.NODE_NAME}/trajectory_finished',
+            f'{self.NODE_NAME}/trajectory_finished',
             Bool,
             queue_size=1,
         )
