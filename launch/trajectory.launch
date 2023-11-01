@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- ============================ SETTINGS ============================= -->
+
+    <arg 
+    name="robot_name" 
+    default="my_gen3"/>
+
+    <!-- ======================== END OF SETTINGS ========================== -->
+    
+    <group ns="/$(arg robot_name)">
+        <!-- Trajectory planner and executor: -->     
+        <node 
+        pkg="kinova_positional_control" 
+        type="trajectory.py"
+        name="trajectory" 
+        output="screen">
+            <param 
+            name="robot_name" 
+            value="$(arg robot_name)"/>
+        </node>     
+    </group>
+</launch>
