@@ -5,10 +5,7 @@
 
 import rospy
 import numpy as np
-from copy import (
-    copy,
-    deepcopy,
-)
+from copy import (copy)
 import quaternion
 import transformations
 
@@ -16,6 +13,7 @@ from std_msgs.msg import (Bool)
 from geometry_msgs.msg import (Pose)
 from std_srvs.srv import (Trigger)
 
+from kinova_positional_control.msg import (Waypoint)
 from kinova_positional_control.srv import (UploadTrajectory)
 
 
@@ -633,10 +631,10 @@ class KinovaTrajectory:
         if angular_difference > 180:
             angular_difference = 360 - angular_difference
 
-        print(
-            f'Linear difference: {linear_difference}\n'
-            f'Angular difference: {angular_difference}\n'
-        )
+        # print(
+        #     f'Linear difference: {linear_difference}\n'
+        #     f'Angular difference: {angular_difference}\n'
+        # )
 
         # Current sample is the final sample.
         if self.__sample_index == self.__num_samples - 1:
@@ -695,6 +693,45 @@ class KinovaTrajectory:
         rospy.loginfo_once(
             f'/{self.ROBOT_NAME}{self.NODE_NAME}: node has shut down.',
         )
+
+
+def define_waypoint(
+    position,
+    orientation,
+    point_lin_prc=0.05,
+    point_ang_prc=1.0,
+    path_lin_prc=0.1,
+    path_ang_prc=5.0,
+    speed_frac=0.5,
+):
+    """
+        
+    """
+
+    orientation_quat = transformations.quaternion_from_euler(
+        np.deg2rad(orientation[0]),
+        np.deg2rad(orientation[1]),
+        np.deg2rad(orientation[2]),
+    )
+
+    pose = Pose()
+    pose.position.x = position[0]
+    pose.position.y = position[1]
+    pose.position.z = position[2]
+    pose.orientation.w = orientation_quat[0]
+    pose.orientation.x = orientation_quat[1]
+    pose.orientation.y = orientation_quat[2]
+    pose.orientation.z = orientation_quat[3]
+
+    waypoint = Waypoint()
+    waypoint.pose = pose
+    waypoint.point_lin_prc = point_lin_prc
+    waypoint.point_ang_prc = point_ang_prc
+    waypoint.path_lin_prc = path_lin_prc
+    waypoint.path_ang_prc = path_ang_prc
+    waypoint.speed_frac = speed_frac
+
+    return waypoint
 
 
 def main():
