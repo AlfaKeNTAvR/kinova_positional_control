@@ -509,23 +509,42 @@ class KinovaPositionalControl:
 
         self.__clear_arm_faults()
 
-        # Disable PID joints control to use kinova cartesian velocity.
-        self.__enable_pid(False)
-
         # Move to a safe Z position before homing.
-        rospy.loginfo(
-            f'/{self.ROBOT_NAME}/positional_control: '
-            'moving to safe Z before homing...'
-        )
+        # TODO: Add upper limit.
+        if self.SAFE_HOMING_Z > 0:
+            # Disable PID joints control to use kinova cartesian velocity.
+            self.__enable_pid(False)
 
-        while (
-            self.kinova_feedback_pose['kcs']['position'][2] < self.SAFE_HOMING_Z
-        ):
-            self.__publish_cartesian_z_velocity(0.05)
+            rospy.logwarn(
+                f'/{self.ROBOT_NAME}/positional_control: '
+                'moving to safe Z before homing...\n'
+                f'- Current Z position: {round(self.kinova_feedback_pose["kcs"]["position"][2], 3)}\n'
+                f'- Target (safe) Z position: {round(self.SAFE_HOMING_Z, 3)}\n'
+            )
 
-        self.__publish_cartesian_z_velocity(0.0)
-        rospy.loginfo(f'/{self.ROBOT_NAME}/positional_control: at safe Z.',)
-        self.__enable_pid(True)
+            if (
+                self.SAFE_HOMING_Z >
+                self.kinova_feedback_pose['kcs']['position'][2]
+            ):
+                while (
+                    self.kinova_feedback_pose['kcs']['position'][2] <
+                    self.SAFE_HOMING_Z
+                ):
+                    self.__publish_cartesian_z_velocity(0.05)
+
+            elif (
+                self.SAFE_HOMING_Z <
+                self.kinova_feedback_pose['kcs']['position'][2]
+            ):
+                while (
+                    self.kinova_feedback_pose['kcs']['position'][2] >
+                    self.SAFE_HOMING_Z
+                ):
+                    self.__publish_cartesian_z_velocity(-0.05)
+
+            self.__publish_cartesian_z_velocity(0.0)
+            rospy.loginfo(f'/{self.ROBOT_NAME}/positional_control: at safe Z.',)
+            self.__enable_pid(True)
 
         # Limit joint velocities to 20% for homing.
         self.__pid_velocity_limit(0.2)
