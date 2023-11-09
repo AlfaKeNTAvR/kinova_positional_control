@@ -17,6 +17,7 @@ import transformations
 from ast import (literal_eval)
 
 from std_msgs.msg import (Bool)
+from std_srvs.srv import (SetBool)
 from geometry_msgs.msg import (Pose)
 
 # from kortex_driver.srv import (Stop)
@@ -73,6 +74,12 @@ class KinovaTeleoperation:
 
         self.__pose_tracking = False
 
+        # If the pose_tracking and control_mode are controlled through a service
+        # call. These conditions are tracked to prevent manual switch with
+        # buttons while in automatic mode.
+        self.__tracking_service_active = False
+        self.__control_mode_service_active = False
+
         # # Public variables:
         # Last commanded Relaxed IK pose is required to compensate controller
         # input.
@@ -121,6 +128,16 @@ class KinovaTeleoperation:
         }
 
         # # Service provider:
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/enable_tracking',
+            SetBool,
+            self.__enable_tracking_handler,
+        )
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/enable_full_mode',
+            SetBool,
+            self.__enable_full_mode_handler,
+        )
 
         # # Service subscriber:
         self.__gripper_force_grasping = rospy.ServiceProxy(
@@ -192,6 +209,97 @@ class KinovaTeleoperation:
         self.__dependency_status['gripper_control'] = message.data
 
     # # Service handlers:
+    def __enable_tracking_handler(self, request):
+        """
+        
+        """
+
+        message = ''
+        success = False
+
+        if not self.__is_initialized:
+            return success, message
+
+        if request.data and not self.__tracking_service_active:
+            self.__tracking_service_active = True
+
+            rospy.logwarn(
+                (
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    'pose_tracking was enabled by a service call.\n'
+                    'Button pose_tracking is now disabled.'
+                ),
+            )
+
+            self.__calculate_compensation()
+            self.__pose_tracking = True
+            self.__tracking_state_machine_state = 0
+
+            message = 'pose_tracking was enabled.'
+            success = True
+
+        elif not request.data and self.__tracking_service_active:
+            self.__pose_tracking = False
+            self.__tracking_service_active = False
+
+            rospy.logwarn(
+                (
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    'pose_tracking was disabled by a service call.\n'
+                    'Button pose_tracking is now enabled.'
+                ),
+            )
+
+            message = 'pose_tracking was disabled.'
+            success = True
+
+        return success, message
+
+    def __enable_full_mode_handler(self, request):
+        """
+        
+        """
+
+        message = ''
+        success = False
+
+        if not self.__is_initialized:
+            return success, message
+
+        if request.data and not self.__control_mode_service_active:
+            self.__control_mode_service_active = True
+
+            rospy.logwarn(
+                (
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    'control_mode was set to "full" by a service call.\n'
+                    'Button control_mode change is now disabled.'
+                ),
+            )
+
+            self.__control_mode = 'full'
+            self.__calculate_compensation()
+            self.__mode_state_machine_state = 0
+
+            message = 'Full (position + orientation) mode.'
+            success = True
+
+        elif not request.data and self.__control_mode_service_active:
+            self.__control_mode = 'position'
+            self.__control_mode_service_active = False
+
+            rospy.logwarn(
+                (
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    'control_mode was set to "position" by a service call.\n'
+                    'Button control_mode change is now enabled.'
+                ),
+            )
+
+            message = 'Position only mode.'
+            success = True
+
+        return success, message
 
     # # Topic callbacks:
     def __input_pose_callback(self, message):
@@ -317,8 +425,14 @@ class KinovaTeleoperation:
 
     def __tracking_state_machine(self, button):
         """
+    
         
         """
+
+        # Do not allow manual tracking control while the tracking is controlled
+        # using the service.
+        if self.__tracking_service_active:
+            return
 
         # State 0: Grip button was pressed.
         if (self.__tracking_state_machine_state == 0 and button):
@@ -356,6 +470,11 @@ class KinovaTeleoperation:
         """
         
         """
+
+        # Do not allow manual mode control while the mode is controlled
+        # using the service.
+        if self.__control_mode_service_active:
+            return
 
         # State 0: Button was pressed.
         if (self.__mode_state_machine_state == 0 and button):
