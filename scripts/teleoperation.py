@@ -6,7 +6,7 @@ TODO: Add detailed description.
 Author (s):
     1. Nikita Boguslavskii (bognik3@gmail.com), Human-Inspired Robotics (HiRo)
        lab, Worcester Polytechnic Institute (WPI), 2023.
-    2. Lorena Genua (lorenagenua@gmail.com), Human-Inspired Robotics (HiRo)
+    2. Lorena Genua (lorena.genua@gmail.com), Human-Inspired Robotics (HiRo)
        lab, Worcester Polytechnic Institute (WPI), 2023.
 
 """
@@ -419,7 +419,10 @@ class KinovaTeleoperation:
             if self.__is_initialized:
                 # NOTE (optionally): Add code, which needs to be executed if the
                 # nodes's status changes from True to False.
-                pass
+
+                # Stop tracking.
+                self.__tracking_state_machine_state = 0
+                self.__pose_tracking = False
 
             self.__is_initialized = False
 
@@ -487,16 +490,16 @@ class KinovaTeleoperation:
         # State 1: Button was released.
         elif (self.__mode_state_machine_state == 1 and not button):
 
-            self.__mode_state_machine_state = 3
+            self.__mode_state_machine_state = 2
 
         # State 2: Button was pressed.
-        elif (self.__mode_state_machine_state == 3 and button):
+        elif (self.__mode_state_machine_state == 2 and button):
 
-            self.__mode_state_machine_state = 4
+            self.__mode_state_machine_state = 3
             self.__control_mode = 'position'
 
         # State 3: Button was released.
-        elif (self.__mode_state_machine_state == 4 and not button):
+        elif (self.__mode_state_machine_state == 3 and not button):
 
             self.__mode_state_machine_state = 0
 
