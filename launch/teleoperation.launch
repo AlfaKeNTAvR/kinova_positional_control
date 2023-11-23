@@ -2,15 +2,23 @@
 <launch>
     <!-- ============================ SETTINGS ============================= -->
 
+    <!-- Node frequency: the frequency [Hz] which rate.sleep() function will
+    attempt to maintain in the main_loop. -->
+    <arg 
+    name="node_frequency" 
+    default="1000"/>
+
     <arg 
     name="robot_name" 
     default="my_gen3"/>
+
     <!-- Tracking mode: "hold" or "toggle". If "hold" mode controller tracking
     button should be constantly held, in "toggle" mode - press once to track
     input, press again to stop tracking. -->
     <arg 
     name="tracking_mode" 
     default="toggle"/>
+
     <!-- Compensate orientation: if "true" - on tracking start or on mode switch
     the difference between current EE orientation and the controller input will
     be calculated. If "false", real controller input orientation will be sent to
@@ -18,12 +26,14 @@
     <arg 
     name="compensate_orientation" 
     default="true"/>
+
     <!-- Convenience compensation [degrees] is only used when compensate_orientation is -->
     <!-- set to "false". Allows to adjust controller input to a more comfortable -->
     <!-- orientation. -->
     <arg 
     name="convenience_compensation" 
     default="[0.0, 0.0, 0.0]"/>
+
     <!-- Maximum allowed change between the current input position / orientation
     and previous commanded position [meters] / orientation [degrees]. Protects
     against too big input change within one control loop cycle (~750Hz). The
@@ -63,6 +73,9 @@
         type="teleoperation.py" 
         name="teleoperation" 
         output="screen">
+            <param 
+            name="node_frequency" 
+            value="$(arg node_frequency)"/>
             <param 
             name="robot_name" 
             value="$(arg robot_name)"/>

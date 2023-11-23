@@ -672,6 +672,11 @@ def main():
     rospy.loginfo('\n\n\n\n\n')  # Add whitespaces to separate logs.
 
     # # ROS parameters:
+    node_frequency = rospy.get_param(
+        param_name=f'{rospy.get_name()}/node_frequency',
+        default=1000,
+    )
+
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',
         default='my_gen3',
@@ -680,9 +685,11 @@ def main():
     joints_control = KinovaJointsControl(robot_name=kinova_name)
 
     rospy.on_shutdown(joints_control.node_shutdown)
+    node_rate = rospy.Rate(node_frequency)
 
     while not rospy.is_shutdown():
         joints_control.main_loop()
+        node_rate.sleep()
 
 
 if __name__ == '__main__':

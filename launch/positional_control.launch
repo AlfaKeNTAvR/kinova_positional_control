@@ -2,19 +2,28 @@
 <launch>
     <!-- ============================ SETTINGS ============================= -->
 
+    <!-- Node frequency: the frequency [Hz] which rate.sleep() function will
+    attempt to maintain in the main_loop. -->
+    <arg 
+    name="node_frequency" 
+    default="1000"/>
+
     <arg 
     name="robot_name" 
     default="my_gen3"/>
+
     <!-- Mounting angles [degrees]: "[0.0, 0.0, 0.0]" - on the table. -->
     <arg 
     name="mounting_angles_deg" 
     default="[180.0, 0.0, 0.0]"/> 
+
     <!-- Move to this Z height [meters] in Kinova CS before moving to starting
     position in Global CS. 0.0 value skips moving to safe Z height.
     -->
     <arg 
     name="safe_homing_z" 
     default="0.4"/>
+
     <!-- Starting (homing) pose in Global CS: position X, Y, Z [meters],
     orientation X, Y, Z [degrees]. Default Kinova homing pose (B button pose)
     given "[0.0, 0.0, 0.0]" mounting angles: 
@@ -78,6 +87,9 @@
         type="positional_control.py"
         name="positional_control" 
         output="screen">
+            <param 
+            name="node_frequency" 
+            value="$(arg node_frequency)"/>
             <param 
             name="robot_name" 
             value="$(arg robot_name)"/>

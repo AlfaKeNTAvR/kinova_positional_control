@@ -2,6 +2,12 @@
 <launch>
     <!-- ============================ SETTINGS ============================= -->
 
+    <!-- Node frequency: the frequency [Hz] which rate.sleep() function will
+    attempt to maintain in the main_loop. -->
+    <arg 
+    name="node_frequency" 
+    default="1000"/>
+
     <arg 
     name="robot_name" 
     default="my_gen3"/>
@@ -48,6 +54,9 @@
         type="oculus_mapping.py" 
         name="oculus_mapping" 
         output="screen">
+            <param 
+            name="node_frequency" 
+            value="$(arg node_frequency)"/>
             <param 
             name="robot_name" 
             value="$(arg robot_name)"/>
