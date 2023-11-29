@@ -435,6 +435,13 @@ class OculusJoystickMapping:
                 self.__target_pose['pcs']['angle'] + d_angle
             )
 
+            # Protection against crossing PCS limits:
+            if self.__target_pose['pcs']['radius'] > 0.4:
+                self.__target_pose['pcs']['radius'] = 0.4
+
+            elif self.__target_pose['pcs']['radius'] < -0.25:
+                self.__target_pose['pcs']['radius'] = -0.25
+
             x_position, y_position = self.__pcs_to_gcs(
                 self.__target_pose['pcs']['radius'],
                 self.__target_pose['pcs']['angle'],
@@ -455,6 +462,13 @@ class OculusJoystickMapping:
             d_height = self.__oculus_joystick.position_y * height_scale * dt
 
             z_position = self.__target_pose['gcs']['position'][2] + d_height
+
+            # Protection against crossing PCS limits:
+            if z_position > -0.28:
+                z_position = -0.28
+
+            elif z_position < -0.6:
+                z_position = -0.6
 
         # Update target positions.
         self.__target_pose['gcs']['position'] = np.array(
