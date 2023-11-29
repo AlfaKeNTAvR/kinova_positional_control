@@ -1,0 +1,59 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- ============================ SETTINGS ============================= -->
+
+    <arg 
+    name="robot_name" 
+    default="my_gen3"/>
+    <!-- Controller side: "right" or "left". -->
+    <arg 
+    name="controller_side" 
+    default="right"/>
+
+    <!-- If any of dependency or optional subfiles should not be launched (or
+    are launched separately) set corresponding argument to "false". -->
+    <arg 
+    name="launch_teleoperation" 
+    default="true"/>
+    <arg 
+    name="launch_controller_feedback" 
+    default="true"/>
+
+    <!-- ======================== END OF SETTINGS ========================== -->
+
+    <!-- Teleoperation module (dependency): -->
+    <group if="$(arg launch_teleoperation)">
+        <include 
+        file="$(find kinova_positional_control)/launch/teleoperation.launch">
+            <arg 
+            name="robot_name" 
+            value="$(arg robot_name)"/>
+        </include>
+    </group>
+
+    <!-- Oculus controller feedback (dependency): -->
+    <group if="$(arg launch_controller_feedback)">
+        <include 
+        file="$(find oculus_ros)/launch/controller_feedback.launch">
+            <arg 
+            name="controller_side" 
+            value="$(arg controller_side)"/>
+        </include>
+    </group>
+
+    <!-- Oculus joystick mapping: -->
+    <group ns="/$(arg robot_name)">
+        <node 
+        pkg="kinova_positional_control" 
+        type="oculus_joystick_mapping.py" 
+        name="oculus_joystick_mapping" 
+        output="screen">
+            <param 
+            name="robot_name" 
+            value="$(arg robot_name)"/>
+            <param 
+            name="controller_side" 
+            value="$(arg controller_side)"/>
+        </node>
+    </group> 
+</launch>
