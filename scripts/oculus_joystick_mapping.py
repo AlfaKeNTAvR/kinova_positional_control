@@ -38,6 +38,10 @@ class OculusJoystickMapping:
             )
 
         # # Private constants:
+        self.__DIFFERENCE_THRESHOLD = {
+            'linear': 0.025,  # [meters].
+            'angular': 5.0,  # [degrees].
+        }
 
         # # Public constants:
         self.NODE_NAME = node_name
@@ -68,6 +72,20 @@ class OculusJoystickMapping:
                 'angle': 0.0,
             }
         }
+
+        # Position and quaternion missalignment between Kinova and Relaxed IK.
+        self.__kinova_relaxed_ik_missalignment = {
+            'position': np.array([0.0, 0.0, 0.0]),
+            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+        }
+
+        # Linear (vector) and angular difference (angle) between Kinova nd
+        # Relaxed IK calculated based on missaligment.
+        self.__kinova_relaxed_ik_difference = {
+            'linear': 0.0,
+            'angular': 0.0,
+        }
+        self.__difference_threshold = copy.deepcopy(self.__DIFFERENCE_THRESHOLD)
 
         self.__mode_state_machine_state = 0
         self.__control_mode = 'polar'
@@ -135,6 +153,12 @@ class OculusJoystickMapping:
             f'/{self.ROBOT_NAME}/relaxed_ik/commanded_pose_gcs',
             Pose,
             self.__commanded_pose_callback,
+        )
+
+        rospy.Subscriber(
+            f'/{self.ROBOT_NAME}/positional_control/kinova_relaxed_ik_missalignment',
+            Pose,
+            self.__kinova_relaxed_ik_missalignment_callback,
         )
 
         # # Timers:
@@ -207,6 +231,54 @@ class OculusJoystickMapping:
             self.__target_pose = copy.deepcopy(self.__last_relaxed_ik_pose)
 
             self.__last_relaxed_ik_pose_recieved = True
+
+    def __kinova_relaxed_ik_missalignment_callback(self, message):
+        """
+
+        """
+
+        self.__kinova_relaxed_ik_missalignment['position'] = np.array(
+            [
+                message.position.x,
+                message.position.y,
+                message.position.z,
+            ]
+        )
+        self.__kinova_relaxed_ik_missalignment['orientation'] = np.array(
+            [
+                message.orientation.w,
+                message.orientation.x,
+                message.orientation.y,
+                message.orientation.z,
+            ]
+        )
+
+        # Calculate linear and angular differences between Relaxed IK and Kinova
+        # using position and quaternion misalignment:
+        self.__kinova_relaxed_ik_difference['linear'] = round(
+            np.linalg.norm(self.__kinova_relaxed_ik_missalignment['position']),
+            3,
+        )
+        angular_difference = round(
+            np.rad2deg(
+                2 * np.arctan2(
+                    np.linalg.norm(
+                        self.__kinova_relaxed_ik_missalignment['orientation']
+                        [1:4]
+                    ),
+                    self.__kinova_relaxed_ik_missalignment['orientation'][0],
+                )
+            ),
+            3,
+        )
+
+        if angular_difference > 180:
+            self.__kinova_relaxed_ik_difference['angular'] = (
+                360 - angular_difference
+            )
+
+        else:
+            self.__kinova_relaxed_ik_difference['angular'] = angular_difference
 
     # # Timer functions:
     def __update_position_timer(self, event):
@@ -404,7 +476,7 @@ class OculusJoystickMapping:
         self.__target_pose['gcs']['position'][1] = (
             self.__last_relaxed_ik_pose['gcs']['position'][1] + dy
             # self.__target_pose['gcs']['position'][1] + dy
-        )
+            )
 
     def __update_position_pcs(self):
         """
@@ -421,6 +493,12 @@ class OculusJoystickMapping:
         x_position = self.__last_relaxed_ik_pose['gcs']['position'][0]
         y_position = self.__last_relaxed_ik_pose['gcs']['position'][1]
         z_position = self.__last_relaxed_ik_pose['gcs']['position'][2]
+
+        if (
+            self.__kinova_relaxed_ik_difference['linear'] >
+            self.__difference_threshold['linear']
+        ):
+            return
 
         # Calculate displacement based on velocity and time delta.
         # Update X and Y:
