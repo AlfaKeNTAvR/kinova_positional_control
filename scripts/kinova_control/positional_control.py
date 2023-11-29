@@ -15,6 +15,7 @@ import numpy as np
 import transformations
 import copy
 from ast import (literal_eval)
+from threading import (Timer)
 
 from std_msgs.msg import (Bool)
 from std_srvs.srv import (SetBool)
@@ -158,6 +159,12 @@ class KinovaPositionalControl:
         self.kinova_relaxed_ik_missalignment = {
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+        }
+
+        self.__homing_timeout = {
+            'timer': None,
+            'is_timer_running': False,
+            'is_timed_out': False,
         }
 
         # # Initialization and dependency status topics:
@@ -494,6 +501,40 @@ class KinovaPositionalControl:
 
         self.__kinova_cartesian_velocity.publish(cartesian_velocity_message)
 
+    def __homing_timeout_timer(self, timeout=5):
+        """
+          
+        """
+
+        # No timer was
+        if not self.__homing_timeout['is_timer_running']:
+
+            # Cancel any running timmers and start a new one.
+            if self.__homing_timeout['timer']:
+                self.__homing_timeout['timer'].cancel()
+
+            self.__homing_timeout['timer'] = Timer(
+                timeout,
+                self.__set_timeout,
+            )
+            self.__homing_timeout['timer'].start()
+            self.__homing_timeout['is_timer_running'] = True
+            self.__homing_timeout['is_timed_out'] = False
+
+    def __set_timeout(self):
+        """
+
+        """
+
+        self.__homing_timeout['is_timed_out'] = True
+
+        rospy.logwarn(
+            f'/{self.ROBOT_NAME}/positional_control: '
+            'safe Z homing timed out!\n'
+            f'- Current Z position: {round(self.kinova_feedback_pose["kcs"]["position"][2], 3)}\n'
+            f'- Target (safe) Z position: {round(self.SAFE_HOMING_Z, 3)}\n'
+        )
+
     def __homing(self):
         """
         
@@ -531,6 +572,10 @@ class KinovaPositionalControl:
                     self.SAFE_HOMING_Z
                 ):
                     self.__publish_cartesian_z_velocity(0.05)
+                    self.__homing_timeout_timer(5)
+
+                    if self.__homing_timeout['is_timed_out']:
+                        break
 
             elif (
                 self.SAFE_HOMING_Z <
@@ -541,6 +586,10 @@ class KinovaPositionalControl:
                     self.SAFE_HOMING_Z
                 ):
                     self.__publish_cartesian_z_velocity(-0.05)
+                    self.__homing_timeout_timer(5)
+
+                    if self.__homing_timeout['is_timed_out']:
+                        break
 
             self.__publish_cartesian_z_velocity(0.0)
             rospy.loginfo(f'/{self.ROBOT_NAME}/positional_control: at safe Z.',)
