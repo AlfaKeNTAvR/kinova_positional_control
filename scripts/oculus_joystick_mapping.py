@@ -49,17 +49,22 @@ class OculusJoystickMapping:
         self.CONTROLLER_SIDE = controller_side
 
         # # Private variables:
-        self.__oculus_joystick = ControllerJoystick()
+        self.__oculus_joystick = {
+            'right': ControllerJoystick(),
+            'left': ControllerJoystick(),
+        }
         self.__last_relaxed_ik_pose = {
             'gcs':
                 {
                     'position': np.array([0.0, 0.0, 0.0]),
                     'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 },
-            'pcs': {
-                'radius': 0.0,
-                'angle': 0.0,
-            }
+            'pcs':
+                {
+                    'radius': 0.0,
+                    'angle': 0.0,
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+                }
         }
         self.__target_pose = {
             'gcs':
@@ -67,10 +72,12 @@ class OculusJoystickMapping:
                     'position': np.array([0.0, 0.0, 0.0]),
                     'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 },
-            'pcs': {
-                'radius': 0.0,
-                'angle': 0.0,
-            }
+            'pcs':
+                {
+                    'radius': 0.0,
+                    'angle': 0.0,
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+                }
         }
 
         # Position and quaternion missalignment between Kinova and Relaxed IK.
@@ -145,9 +152,14 @@ class OculusJoystickMapping:
 
         # # Topic subscriber:
         rospy.Subscriber(
-            f'/{self.CONTROLLER_SIDE}/controller_feedback/joystick',
+            f'/right/controller_feedback/joystick',
             ControllerJoystick,
-            self.__oculus_joystick_callback,
+            self.__right_oculus_joystick_callback,
+        )
+        rospy.Subscriber(
+            f'/left/controller_feedback/joystick',
+            ControllerJoystick,
+            self.__left_oculus_joystick_callback,
         )
         rospy.Subscriber(
             f'/{self.ROBOT_NAME}/relaxed_ik/commanded_pose_gcs',
@@ -185,15 +197,25 @@ class OculusJoystickMapping:
     #     return response
 
     # # Topic callbacks:
-    def __oculus_joystick_callback(self, message):
+    def __right_oculus_joystick_callback(self, message):
         """
 
         """
 
-        self.__oculus_joystick.position_x = message.position_x
-        self.__oculus_joystick.position_y = message.position_y
+        self.__oculus_joystick['right'].position_x = message.position_x
+        self.__oculus_joystick['right'].position_y = message.position_y
 
-        self.__oculus_joystick.button = message.button
+        self.__oculus_joystick['right'].button = message.button
+
+    def __left_oculus_joystick_callback(self, message):
+        """
+
+        """
+
+        self.__oculus_joystick['left'].position_x = message.position_x
+        self.__oculus_joystick['left'].position_y = message.position_y
+
+        self.__oculus_joystick['left'].button = message.button
 
     def __commanded_pose_callback(self, message):
         """
@@ -225,6 +247,15 @@ class OculusJoystickMapping:
         ) = self.__gcs_to_pcs(
             message.position.x,
             message.position.y,
+        )
+        self.__last_relaxed_ik_pose['pcs']['orientation'] = (
+            transformations.quaternion_multiply(
+                transformations.quaternion_about_axis(
+                    -np.deg2rad(self.__last_relaxed_ik_pose['pcs']['angle']),
+                    (0, 0, 1),  # Around Z.
+                ),
+                self.__last_relaxed_ik_pose['gcs']['orientation'],
+            )
         )
 
         if not self.__last_relaxed_ik_pose_recieved:
@@ -465,8 +496,8 @@ class OculusJoystickMapping:
         v_scale = 0.1  # units/second
 
         # Calculate displacement based on velocity and time delta.
-        dx = self.__oculus_joystick.position_y * v_scale * dt
-        dy = -self.__oculus_joystick.position_x * v_scale * dt
+        dx = self.__oculus_joystick['right'].position_y * v_scale * dt
+        dy = -self.__oculus_joystick['right'].position_x * v_scale * dt
 
         # Update the position:
         self.__target_pose['gcs']['position'][0] = (
@@ -476,7 +507,7 @@ class OculusJoystickMapping:
         self.__target_pose['gcs']['position'][1] = (
             self.__last_relaxed_ik_pose['gcs']['position'][1] + dy
             # self.__target_pose['gcs']['position'][1] + dy
-            )
+        )
 
     def __update_position_pcs(self):
         """
@@ -488,7 +519,14 @@ class OculusJoystickMapping:
         dt = 1.0 / 100  # Time delta, seconds
         radius_scale = 0.1  # Units/second.
         height_scale = 0.1  # Units/second.
-        angle_scale = 10.0
+        angle_scale = {
+            'z': 20.0,
+            'y': 10.0,
+        }
+
+        d_radius = 0
+        d_z_angle = 0
+        d_y_angle = 0
 
         x_position = self.__last_relaxed_ik_pose['gcs']['position'][0]
         y_position = self.__last_relaxed_ik_pose['gcs']['position'][1]
@@ -500,17 +538,36 @@ class OculusJoystickMapping:
         ):
             return
 
+        # Update Y orientation:
+        d_y_angle = (
+            -self.__oculus_joystick['left'].position_y * angle_scale['y'] * dt
+        )
+        self.__target_pose['pcs']['orientation'] = (
+            transformations.quaternion_multiply(
+                transformations.quaternion_about_axis(
+                    np.deg2rad(d_y_angle),
+                    (0, 1, 0),  # Around Y.
+                ),
+                self.__target_pose['pcs']['orientation'],
+            )
+        )
+
         # Calculate displacement based on velocity and time delta.
         # Update X and Y:
         if self.__control_mode == 'polar':
-            d_radius = self.__oculus_joystick.position_y * radius_scale * dt
-            d_angle = -self.__oculus_joystick.position_x * angle_scale * dt
+            d_radius = (
+                self.__oculus_joystick['right'].position_y * radius_scale * dt
+            )
+            d_z_angle = (
+                -self.__oculus_joystick['right'].position_x * angle_scale['z']
+                * dt
+            )
 
             self.__target_pose['pcs']['radius'] = (
                 self.__target_pose['pcs']['radius'] + d_radius
             )
             self.__target_pose['pcs']['angle'] = (
-                self.__target_pose['pcs']['angle'] + d_angle
+                self.__target_pose['pcs']['angle'] + d_z_angle
             )
 
             # Protection against crossing PCS limits:
@@ -525,21 +582,13 @@ class OculusJoystickMapping:
                 self.__target_pose['pcs']['angle'],
             )
 
-            self.__target_pose['gcs']['orientation'] = (
-                transformations.quaternion_multiply(
-                    transformations.quaternion_about_axis(
-                        np.deg2rad(d_angle),
-                        (0, 0, 1),  # Around Z.
-                    ),
-                    self.__target_pose['gcs']['orientation'],
-                )
-            )
-
         # Update Z:
         elif self.__control_mode == 'height':
-            d_height = self.__oculus_joystick.position_y * height_scale * dt
+            d_height = (
+                self.__oculus_joystick['right'].position_y * height_scale * dt
+            )
 
-            z_position = self.__target_pose['gcs']['position'][2] + d_height
+            z_position = (self.__target_pose['gcs']['position'][2] + d_height)
 
             # Protection against crossing PCS limits:
             if z_position > -0.28:
@@ -548,13 +597,36 @@ class OculusJoystickMapping:
             elif z_position < -0.6:
                 z_position = -0.6
 
-        # Update target positions.
+        # Update target position:
         self.__target_pose['gcs']['position'] = np.array(
             [
                 x_position,
                 y_position,
                 z_position,
             ]
+        )
+
+        # Update target orientation:
+        # First convert PCS to GCS to apply rotation around Y.
+        self.__target_pose['gcs']['orientation'] = (
+            transformations.quaternion_multiply(
+                transformations.quaternion_about_axis(
+                    np.deg2rad(self.__target_pose['pcs']['angle']),
+                    (0, 0, 1),  # Around Z.
+                ),
+                self.__target_pose['pcs']['orientation'],
+            )
+        )
+
+        # Second apply additional rotation around Z.
+        self.__target_pose['gcs']['orientation'] = (
+            transformations.quaternion_multiply(
+                transformations.quaternion_about_axis(
+                    np.deg2rad(d_z_angle),
+                    (0, 0, 1),  # Around Z.
+                ),
+                self.__target_pose['gcs']['orientation'],
+            )
         )
 
     def __publish_target_pose(self):
@@ -596,7 +668,7 @@ class OculusJoystickMapping:
 
         # NOTE: Add code (function calls), which has to be executed once the
         # node was successfully initialized.
-        self.__mode_state_machine(self.__oculus_joystick.button)
+        self.__mode_state_machine(self.__oculus_joystick['right'].button)
 
         self.__publish_target_pose()
 
