@@ -80,12 +80,6 @@ class OculusJoystickMapping:
                 }
         }
 
-        # Position and quaternion missalignment between Kinova and Relaxed IK.
-        self.__kinova_relaxed_ik_missalignment = {
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
-        }
-
         # Linear (vector) and angular difference (angle) between Kinova nd
         # Relaxed IK calculated based on missaligment.
         self.__kinova_relaxed_ik_difference = {
@@ -268,14 +262,15 @@ class OculusJoystickMapping:
 
         """
 
-        self.__kinova_relaxed_ik_missalignment['position'] = np.array(
+        kinova_relaxed_ik_missalignment = {}
+        kinova_relaxed_ik_missalignment['position'] = np.array(
             [
                 message.position.x,
                 message.position.y,
                 message.position.z,
             ]
         )
-        self.__kinova_relaxed_ik_missalignment['orientation'] = np.array(
+        kinova_relaxed_ik_missalignment['orientation'] = np.array(
             [
                 message.orientation.w,
                 message.orientation.x,
@@ -287,17 +282,16 @@ class OculusJoystickMapping:
         # Calculate linear and angular differences between Relaxed IK and Kinova
         # using position and quaternion misalignment:
         self.__kinova_relaxed_ik_difference['linear'] = round(
-            np.linalg.norm(self.__kinova_relaxed_ik_missalignment['position']),
+            np.linalg.norm(kinova_relaxed_ik_missalignment['position']),
             3,
         )
         angular_difference = round(
             np.rad2deg(
                 2 * np.arctan2(
                     np.linalg.norm(
-                        self.__kinova_relaxed_ik_missalignment['orientation']
-                        [1:4]
+                        kinova_relaxed_ik_missalignment['orientation'][1:4]
                     ),
-                    self.__kinova_relaxed_ik_missalignment['orientation'][0],
+                    kinova_relaxed_ik_missalignment['orientation'][0],
                 )
             ),
             3,
