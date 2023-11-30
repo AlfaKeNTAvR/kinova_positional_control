@@ -549,6 +549,38 @@ class KinovaTeleoperation:
             )
         )
 
+    def __stop_tracking(self):
+        """
+        
+        """
+
+        if self.__tracking_service_active:
+            self.__tracking_service_active = False
+
+            rospy.logwarn(
+                (
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    'tracking service is now not active.\n'
+                    'Button pose_tracking is now enabled.\n'
+                ),
+            )
+
+        # Deactivate control mode service:
+        if self.__control_mode_service_active:
+            self.__control_mode_service_active = False
+
+            rospy.logwarn(
+                (
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    'control_mode service is now not active.\n'
+                    'Button control_mode change is now enabled.'
+                    f'Current control_mode is {self.__control_mode}\n'
+                ),
+            )
+
+        self.__tracking_state_machine_state = 0
+        self.__pose_tracking = False
+
     def __publish_kinova_pose(self):
         """
         
@@ -561,9 +593,7 @@ class KinovaTeleoperation:
             and self.__input_pose['position'][1] == 0
             and self.__input_pose['position'][2] == 0 and self.__pose_tracking
         ):
-            # Stop tracking.
-            self.__tracking_state_machine_state = 0
-            self.__pose_tracking = False
+            self.__stop_tracking()
 
             rospy.logerr(
                 (
@@ -643,10 +673,7 @@ class KinovaTeleoperation:
         )
 
         if (input_position_difference > self.MAXIMUM_INPUT_POSITION_CHANGE):
-
-            # Stop tracking.
-            self.__tracking_state_machine_state = 0
-            self.__pose_tracking = False
+            self.__stop_tracking()
 
             rospy.logerr(
                 (
@@ -686,9 +713,7 @@ class KinovaTeleoperation:
             input_angular_difference = 360 - input_angular_difference
 
         if (input_angular_difference > self.MAXIMUM_INPUT_ORIENTATION_CHANGE):
-            # Stop tracking.
-            self.__tracking_state_machine_state = 0
-            self.__pose_tracking = False
+            self.__stop_tracking()
 
             rospy.logerr(
                 (
