@@ -43,6 +43,17 @@ class OculusJoystickMapping:
             'angular': 5.0,  # [degrees].
         }
 
+        self.__T_GCS_TO_HPCS = np.array(
+            [
+                [1, 0, 0, 0.25],
+                [0, 1, 0, 0.0],
+                [0, 0, 1, 0.0],
+                [0, 0, 0, 1],
+            ]
+        )
+        self.__T_HPCS_TO_GCS = np.linalg.inv(self.__T_GCS_TO_HPCS)
+
+
         # # Public constants:
         self.NODE_NAME = node_name
         self.ROBOT_NAME = robot_name
@@ -59,7 +70,7 @@ class OculusJoystickMapping:
                     'position': np.array([0.0, 0.0, 0.0]),
                     'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 },
-            'pcs':
+            'hpcs':
                 {
                     'radius': 0.0,
                     'angle': 0.0,
@@ -72,7 +83,7 @@ class OculusJoystickMapping:
                     'position': np.array([0.0, 0.0, 0.0]),
                     'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 },
-            'pcs':
+            'hpcs':
                 {
                     'radius': 0.0,
                     'angle': 0.0,
@@ -234,18 +245,21 @@ class OculusJoystickMapping:
             message.orientation.z
         )
 
-        # Polar CS:
-        (
-            self.__last_relaxed_ik_pose['pcs']['radius'],
-            self.__last_relaxed_ik_pose['pcs']['angle'],
-        ) = self.__gcs_to_pcs(
-            message.position.x,
-            message.position.y,
+        # Horizontal Polar CS:
+        point_hpcs = self.__gcs_to_hpcs(
+            np.array([
+                message.position.x,
+                message.position.y,
+                0,
+            ]),
         )
-        self.__last_relaxed_ik_pose['pcs']['orientation'] = (
+        self.__last_relaxed_ik_pose['hpcs']['radius'] = point_hpcs[0]
+        self.__last_relaxed_ik_pose['hpcs']['angle'] = point_hpcs[1]
+
+        self.__last_relaxed_ik_pose['hpcs']['orientation'] = (
             transformations.quaternion_multiply(
                 transformations.quaternion_about_axis(
-                    -np.deg2rad(self.__last_relaxed_ik_pose['pcs']['angle']),
+                    -np.deg2rad(self.__last_relaxed_ik_pose['hpcs']['angle']),
                     (0, 0, 1),  # Around Z.
                 ),
                 self.__last_relaxed_ik_pose['gcs']['orientation'],
@@ -314,7 +328,7 @@ class OculusJoystickMapping:
         if not self.__is_initialized:
             return
 
-        self.__update_position_pcs()
+        self.__update_position_hpcs()
         # self.__update_position_gcs()
 
     # # Private methods:
@@ -408,35 +422,66 @@ class OculusJoystickMapping:
 
         self.__node_is_initialized.publish(self.__is_initialized)
 
-    def __gcs_to_pcs(self, x_gcs, y_gcs):
+    def __cartesian_to_polar(self, x, y):
         """
-        From Global CS to Tank CS to Polar CS.
-
+        
         """
 
-        x_tcs = x_gcs + 0.25
-        y_tcs = y_gcs + 0.06
-
-        radius = math.sqrt(x_tcs**2 + y_tcs**2)
-        angle_radians = math.atan2(y_tcs, x_tcs)
+        radius = math.sqrt(x**2 + y**2)
+        angle_radians = math.atan2(y, x)
         angle_degrees = math.degrees(angle_radians)
 
         return radius, angle_degrees
 
-    def __pcs_to_gcs(self, radius, angle_in_degrees):
+    def __polar_to_catresian(self, radius, angle_degrees):
         """
-        From Polar CS to Tank CS to Global CS.
-       
+        
         """
 
-        angle_in_radians = math.radians(angle_in_degrees)
-        x_tcs = radius * math.cos(angle_in_radians)
-        y_tcs = radius * math.sin(angle_in_radians)
+        angle_in_radians = math.radians(angle_degrees)
+        x = radius * math.cos(angle_in_radians)
+        y = radius * math.sin(angle_in_radians)
 
-        x_gcs = x_tcs - 0.25
-        y_gcs = y_tcs - 0.06
+        return x, y
 
-        return x_gcs, y_gcs
+    def __gcs_to_hpcs(self, point_gcs):
+        """
+        From Global CS to Horizontal Polar CS.
+
+        tcs - Tank Coordinate system.
+
+        """
+
+        # Linear transition:
+        point_gcs = np.insert(point_gcs, 3, 1)
+        point_tcs = self.__T_GCS_TO_HPCS @ point_gcs
+
+        # Conversion to polar coordinates (X-Y plane):
+        radius, angle_degrees = self.__cartesian_to_polar(
+            point_tcs[0], point_tcs[1]
+        )
+
+        point_hpcs = np.array([radius, angle_degrees, point_gcs[2]])
+
+        return point_hpcs
+
+    def __hpcs_to_gcs(self, point_hpcs):
+        """
+        From Horizontal Polar CS to Global CS.
+
+        tcs - Tank Coordinate system.
+
+        """
+
+        # Conversion to Cartesian coordinates (X-Y plane):
+        x_tcs, y_tcs = self.__polar_to_catresian(point_hpcs[0], point_hpcs[1])
+
+        # Linear transition:
+        point_tcs = np.array([x_tcs, y_tcs, point_hpcs[2], 1])
+        point_gcs = self.__T_HPCS_TO_GCS @ point_tcs
+        point_gcs = np.delete(point_gcs, 3)
+
+        return point_gcs
 
     def __mode_state_machine(self, button):
         """
@@ -503,7 +548,7 @@ class OculusJoystickMapping:
             # self.__target_pose['gcs']['position'][1] + dy
         )
 
-    def __update_position_pcs(self):
+    def __update_position_hpcs(self):
         """
         Joystick velocity control in Polar CS.
         
@@ -526,23 +571,23 @@ class OculusJoystickMapping:
         y_position = self.__last_relaxed_ik_pose['gcs']['position'][1]
         z_position = self.__last_relaxed_ik_pose['gcs']['position'][2]
 
-        if (
-            self.__kinova_relaxed_ik_difference['linear'] >
-            self.__difference_threshold['linear']
-        ):
-            return
+        # if (
+        #     self.__kinova_relaxed_ik_difference['linear'] >
+        #     self.__difference_threshold['linear']
+        # ):
+        #     return
 
         # Update Y orientation:
         d_y_angle = (
             -self.__oculus_joystick['left'].position_y * angle_scale['y'] * dt
         )
-        self.__target_pose['pcs']['orientation'] = (
+        self.__target_pose['hpcs']['orientation'] = (
             transformations.quaternion_multiply(
                 transformations.quaternion_about_axis(
                     np.deg2rad(d_y_angle),
                     (0, 1, 0),  # Around Y.
                 ),
-                self.__target_pose['pcs']['orientation'],
+                self.__target_pose['hpcs']['orientation'],
             )
         )
 
@@ -557,24 +602,31 @@ class OculusJoystickMapping:
                 * dt
             )
 
-            self.__target_pose['pcs']['radius'] = (
-                self.__target_pose['pcs']['radius'] + d_radius
+            self.__target_pose['hpcs']['radius'] = (
+                self.__target_pose['hpcs']['radius'] + d_radius
             )
-            self.__target_pose['pcs']['angle'] = (
-                self.__target_pose['pcs']['angle'] + d_z_angle
+            self.__target_pose['hpcs']['angle'] = (
+                self.__target_pose['hpcs']['angle'] + d_z_angle
             )
 
             # Protection against crossing PCS limits:
-            if self.__target_pose['pcs']['radius'] > 0.4:
-                self.__target_pose['pcs']['radius'] = 0.4
+            if self.__target_pose['hpcs']['radius'] > 0.4:
+                self.__target_pose['hpcs']['radius'] = 0.4
 
-            elif self.__target_pose['pcs']['radius'] < -0.25:
-                self.__target_pose['pcs']['radius'] = -0.25
+            if self.__target_pose['hpcs']['radius'] < -0.25:
+                self.__target_pose['hpcs']['radius'] = -0.25
 
-            x_position, y_position = self.__pcs_to_gcs(
-                self.__target_pose['pcs']['radius'],
-                self.__target_pose['pcs']['angle'],
+            point_gcs = self.__hpcs_to_gcs(
+                np.array(
+                    [
+                        self.__target_pose['hpcs']['radius'],
+                        self.__target_pose['hpcs']['angle'],
+                        0,
+                    ]
+                )
             )
+
+            x_position, y_position = point_gcs[0], point_gcs[1]
 
         # Update Z:
         elif self.__control_mode == 'height':
@@ -605,10 +657,10 @@ class OculusJoystickMapping:
         self.__target_pose['gcs']['orientation'] = (
             transformations.quaternion_multiply(
                 transformations.quaternion_about_axis(
-                    np.deg2rad(self.__target_pose['pcs']['angle']),
+                    np.deg2rad(self.__target_pose['hpcs']['angle']),
                     (0, 0, 1),  # Around Z.
                 ),
-                self.__target_pose['pcs']['orientation'],
+                self.__target_pose['hpcs']['orientation'],
             )
         )
 
