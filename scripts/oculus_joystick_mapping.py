@@ -10,7 +10,11 @@ import transformations
 import copy
 from threading import (Timer)
 
-from std_msgs.msg import (Bool)
+from std_msgs.msg import (
+    Bool,
+    Float32,
+    String,
+)
 from std_srvs.srv import (SetBool)
 from geometry_msgs.msg import (Pose)
 
@@ -199,6 +203,27 @@ class OculusJoystickMapping:
         self.__teleoperation_pose = rospy.Publisher(
             f'/{self.ROBOT_NAME}/teleoperation/input_pose',
             Pose,
+            queue_size=1,
+        )
+
+        self.__scoop_orientation = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/koura_ar/scoop_orientation',
+            Float32,
+            queue_size=1,
+        )
+        self.__scoop_height = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/koura_ar/scoop_height',
+            Float32,
+            queue_size=1,
+        )
+        self.__linear_missalignment = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/koura_ar/linear_missalignment',
+            Float32,
+            queue_size=1,
+        )
+        self.__control_mode_publisher = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/koura_ar/control_mode',
+            String,
             queue_size=1,
         )
 
@@ -757,7 +782,7 @@ class OculusJoystickMapping:
 
             # Protection against crossing PCS limits:
             radius_limit = {
-                'upper': 0.33,
+                'upper': 0.28,
                 'lower': -0.33,
             }
             if self.__target_pose['hpcs']['radius'] > radius_limit['upper']:
@@ -869,6 +894,34 @@ class OculusJoystickMapping:
         # rospy.loginfo_throttle(10, pose_message)
         self.__teleoperation_pose.publish(pose_message)
 
+    def __publish_koura_ar(self):
+        """
+        
+        """
+
+        message = Float32()
+        message.data = float(self.__target_pose['vpcs']['angle']) - 112
+
+        self.__scoop_orientation.publish(message)
+
+        message = Float32()
+        message.data = float(
+            self.__target_pose['gcs']['position'][2]
+            + self.__target_pose['eecs']['position'][2]
+        )
+
+        self.__scoop_height.publish(message)
+
+        message = Float32()
+        message = float(self.__kinova_relaxed_ik_difference['linear'])
+
+        self.__linear_missalignment.publish(message)
+
+        message = String()
+        message.data = self.__control_mode
+
+        self.__control_mode_publisher.publish(message)
+
     # # Public methods:
     def main_loop(self):
         """
@@ -885,6 +938,8 @@ class OculusJoystickMapping:
         self.__mode_state_machine(self.__oculus_joystick['right'].button)
 
         self.__publish_target_pose()
+
+        self.__publish_koura_ar()
 
     def node_shutdown(self):
         """

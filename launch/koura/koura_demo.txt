@@ -1,0 +1,15 @@
+1. Hiro_Lab Wifi 5GHz
+
+2. roscore
+
+3. roslaunch kortex_driver kortex_driver.launch start_rviz:=false gripper:=robotiq_2f_85 ip_address:=192.168.1.11
+
+4. roslaunch unity_ros endpoint.launch 
+
+5. roslaunch kinova_positional_control camera_workspace1.launch
+
+6. roslaunch kinova_positional_control camera_workspace2.launch
+
+7. roslaunch kinova_positional_control camera_kinova.launch
+
+8. roslaunch kinova_positional_control oculus_joystick_mapping.launch

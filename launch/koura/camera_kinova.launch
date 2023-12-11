@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- ============================ SETTINGS ============================= -->
+
+
+    <!-- ======================== END OF SETTINGS ========================== -->
+
+    <include 
+    file="$(find kinova_vision)/launch/kinova_vision.launch">
+        <arg 
+        name="device" 
+        value="192.168.1.11"/>
+    </include>
+
+    <group ns="/my_gen3">
+      <node 
+      name="koura_ar" 
+      pkg="kinova_positional_control" 
+      type="koura_ar.py" 
+      output="screen">
+        <param 
+        name="node_frequency" 
+        value="100"/>
+        <param 
+        name="image_topic" 
+        value="/camera/color/image_raw"/>
+      </node>
+    </group>
+
+    <include 
+    file="$(find udp_ros)/launch/udp_streamer.launch">
+        <arg 
+        name="camera_name" 
+        value="kinova"/>
+        <arg 
+        name="image_topic" 
+        value="/my_gen3/koura_ar/augmented_image"/>
+        <arg 
+        name="udp_ip" 
+        value="192.168.0.102"/>
+        <arg 
+        name="udp_port" 
+        value="8083"/> 
+        <arg 
+        name="jpg_quality" 
+        value="80"/> 
+    </include>
+</launch>

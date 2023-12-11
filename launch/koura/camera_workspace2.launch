@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- ============================ SETTINGS ============================= -->
+
+
+    <!-- ======================== END OF SETTINGS ========================== -->
+
+    <include 
+    file="$(find realsense2_camera)/launch/rs_camera.launch">
+        <arg 
+        name="camera" 
+        value="workspace2"/>
+        <arg 
+        name="serial_no" 
+        value="242622070739"/>
+        <arg 
+        name="color_fps" 
+        value="15"/>
+        <arg 
+        name="depth_fps" 
+        value="15"/>
+    </include>
+
+
+    <include 
+    file="$(find udp_ros)/launch/udp_streamer.launch">
+        <arg 
+        name="camera_name" 
+        value="workspace2"/>
+        <arg 
+        name="image_topic" 
+        value="/workspace2/color/image_raw"/>
+        <arg 
+        name="udp_ip" 
+        value="192.168.0.105"/>
+        <arg 
+        name="udp_port" 
+        value="8082"/> 
+    </include>
+</launch>

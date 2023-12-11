@@ -6,15 +6,11 @@
     attempt to maintain in the main_loop. -->
     <arg 
     name="node_frequency" 
-    default="1000"/>
+    default="100"/>
 
     <arg 
     name="robot_name" 
     default="my_gen3"/>
-    <!-- Controller side: "right" or "left". -->
-    <arg 
-    name="controller_side" 
-    default="right"/>
 
     <!-- If any of dependency or optional subfiles should not be launched (or
     are launched separately) set corresponding argument to "false". -->
@@ -43,7 +39,20 @@
         file="$(find oculus_ros)/launch/controller_feedback.launch">
             <arg 
             name="controller_side" 
-            value="$(arg controller_side)"/>
+            value="right"/>
+            <arg 
+            name="enable_joystick_deadzones" 
+            value="true"/>
+        </include>
+
+        <include 
+        file="$(find oculus_ros)/launch/controller_feedback.launch">
+            <arg 
+            name="controller_side" 
+            value="left"/>
+            <arg 
+            name="enable_joystick_deadzones" 
+            value="true"/>
         </include>
     </group>
 
@@ -60,9 +69,6 @@
             <param 
             name="robot_name" 
             value="$(arg robot_name)"/>
-            <param 
-            name="controller_side" 
-            value="$(arg controller_side)"/>
         </node>
     </group> 
 </launch>

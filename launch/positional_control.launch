@@ -6,7 +6,7 @@
     attempt to maintain in the main_loop. -->
     <arg 
     name="node_frequency" 
-    default="1000"/>
+    default="100"/>
 
     <arg 
     name="robot_name" 
@@ -22,7 +22,7 @@
     -->
     <arg 
     name="safe_homing_z" 
-    default="0.4"/>
+    default="0.5"/>
 
     <!-- Starting (homing) pose in Global CS: position X, Y, Z [meters],
     orientation X, Y, Z [degrees]. Default Kinova homing pose (B button pose)
@@ -30,7 +30,7 @@
     "{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}"  -->
     <arg 
     name="starting_pose" 
-    default="{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}"/>
+    default="{'position': [-0.05, 0.0, -0.25], 'orientation': [0.0, 15.0, 0.0]}"/>
 
     <!-- If any of dependency or optional subfiles should not be launched (or
     are launched separately) set corresponding argument to "false". -->
