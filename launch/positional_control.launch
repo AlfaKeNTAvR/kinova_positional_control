@@ -15,7 +15,7 @@
     <!-- Mounting angles [degrees]: "[0.0, 0.0, 0.0]" - on the table. -->
     <arg 
     name="mounting_angles_deg" 
-    default="[0.0, -48.2, 90.0]"/> 
+    default="[0.0, -45.0, 90.0]"/> 
 
     <!-- Move to this Z height [meters] in Kinova CS before moving to starting
     position in Global CS. 0.0 value skips moving to safe Z height.
