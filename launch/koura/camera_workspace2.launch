@@ -15,10 +15,10 @@
         value="242622070739"/>
         <arg 
         name="color_fps" 
-        value="15"/>
+        value="30"/>
         <arg 
         name="depth_fps" 
-        value="15"/>
+        value="30"/>
     </include>
 
 

@@ -22,7 +22,7 @@
     -->
     <arg 
     name="safe_homing_z" 
-    default="0.5"/>
+    default="0.6"/>
 
     <!-- Starting (homing) pose in Global CS: position X, Y, Z [meters],
     orientation X, Y, Z [degrees]. Default Kinova homing pose (B button pose)
@@ -30,7 +30,7 @@
     "{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}"  -->
     <arg 
     name="starting_pose" 
-    default="{'position': [-0.05, 0.0, -0.25], 'orientation': [0.0, 15.0, 0.0]}"/>
+    default="{'position': [-0.3, 0.0, -0.45], 'orientation': [0.0, 15.0, 0.0]}"/>
 
     <!-- If any of dependency or optional subfiles should not be launched (or
     are launched separately) set corresponding argument to "false". -->

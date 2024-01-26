@@ -63,7 +63,7 @@ class OculusJoystickMapping:
         # Transition matrices:
         self.__T_GCS_TO_HPCS = np.array(
             [
-                [1, 0, 0, 0.25],
+                [1, 0, 0, 0.39],
                 [0, 1, 0, 0.0],
                 [0, 0, 1, 0.0],
                 [0, 0, 0, 1],
@@ -782,14 +782,15 @@ class OculusJoystickMapping:
 
             # Protection against crossing PCS limits:
             radius_limit = {
-                'upper': 0.28,
-                'lower': -0.33,
+                'upper': 0.22,
+                'lower': -0.48,
             }
             if self.__target_pose['hpcs']['radius'] > radius_limit['upper']:
                 self.__target_pose['hpcs']['radius'] = radius_limit['upper']
 
             if self.__target_pose['hpcs']['radius'] < radius_limit['lower']:
                 self.__target_pose['hpcs']['radius'] = radius_limit['lower']
+            # print(self.__target_pose['hpcs']['radius'])
 
         # Update Z:
         elif self.__control_mode == 'height':

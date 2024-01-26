@@ -282,10 +282,10 @@ class KouraAR:
 
         color = (255, 140, 0)
 
-        if self.__scoop_height < -0.29 and self.__scoop_height > -0.46:
+        if self.__scoop_height < -0.19 and self.__scoop_height > -0.56:
             color = (0, 165, 255)
 
-        elif self.__scoop_height <= -0.46:
+        elif self.__scoop_height <= -0.56:
             color = (0, 0, 255)
 
         # Define a rotated rectangle (center, size, angle).
