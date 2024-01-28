@@ -53,6 +53,11 @@
     name="launch_positional_control" 
     default="true"/>
 
+    <!-- If set to "true" enable rosbag recording of nodes' outputs. -->
+    <arg 
+    name="enable_rosbag_recording" 
+    default="true"/>
+
     <!-- ======================== END OF SETTINGS ========================== -->
 
 
@@ -95,5 +100,21 @@
             name="maximum_input_orientation_change"
             value="$(arg maximum_input_orientation_change)"/>
         </node>   
+    </group>
+
+    <!-- Rosbag: -->
+    <group if="$(arg enable_rosbag_recording)">
+        <node 
+        pkg="rosbag" 
+        type="record" 
+        name="rosbag"
+        ns="/$(arg robot_name)/teleoperation"
+        output="screen"
+        args="
+        /$(arg robot_name)/teleoperation/is_initialized
+        /$(arg robot_name)/positional_control/input_pose
+        -o $(find kinova_positional_control)/bagfiles/teleoperation/$(arg robot_name)
+        ">
+        </node>    
     </group>
 </launch>

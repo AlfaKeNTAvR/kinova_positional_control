@@ -18,6 +18,11 @@
     name="launch_pid_controllers" 
     default="true"/>
 
+    <!-- If set to "true" enable rosbag recording of nodes' outputs. -->
+    <arg 
+    name="enable_rosbag_recording" 
+    default="true"/>
+
     <!-- ======================== END OF SETTINGS ========================== -->
 
 
@@ -45,5 +50,22 @@
         name="robot_name" 
         value="$(arg robot_name)"/>
       </node>
+    </group>
+
+    <!-- Rosbag: -->
+    <group if="$(arg enable_rosbag_recording)">
+        <node 
+        pkg="rosbag" 
+        type="record" 
+        name="rosbag"
+        ns="/$(arg robot_name)/joints_control"
+        output="screen"
+        args="
+        /$(arg robot_name)/joints_control/is_initialized
+        /$(arg robot_name)/joints_control/motion_finished
+        /$(arg robot_name)/in/joint_velocity
+        -o $(find kinova_positional_control)/bagfiles/joints_control/$(arg robot_name)
+        ">
+        </node>    
     </group>
 </launch>

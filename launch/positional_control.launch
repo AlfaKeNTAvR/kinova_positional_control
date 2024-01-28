@@ -44,6 +44,11 @@
     name="launch_gripper_control" 
     default="true"/>
 
+    <!-- If set to "true" enable rosbag recording of nodes' outputs. -->
+    <arg 
+    name="enable_rosbag_recording" 
+    default="true"/>
+
     <!-- ======================== END OF SETTINGS ========================== -->
     
 
@@ -103,5 +108,23 @@
             name="starting_pose" 
             value="$(arg starting_pose)"/>
         </node>     
+    </group>
+
+    <!-- Rosbag: -->
+    <group if="$(arg enable_rosbag_recording)">
+        <node 
+        pkg="rosbag" 
+        type="record" 
+        name="rosbag"
+        ns="/$(arg robot_name)/positional_control"
+        output="screen"
+        args="
+        /$(arg robot_name)/positional_control/is_initialized
+        /$(arg robot_name)/in/cartesian_velocity
+        /$(arg robot_name)/relaxed_ik/ee_pose_goals
+        /$(arg robot_name)/relaxed_ik/commanded_pose_gcs
+        -o $(find kinova_positional_control)/bagfiles/positional_control/$(arg robot_name)
+        ">
+        </node>    
     </group>
 </launch>

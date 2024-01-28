@@ -25,6 +25,11 @@
     name="launch_controller_feedback" 
     default="true"/>
 
+    <!-- If set to "true" enable rosbag recording of nodes' outputs. -->
+    <arg 
+    name="enable_rosbag_recording" 
+    default="true"/>
+
     <!-- ======================== END OF SETTINGS ========================== -->
 
     <!-- Teleoperation module (dependency): -->
@@ -65,4 +70,23 @@
             value="$(arg controller_side)"/>
         </node>
     </group> 
+
+    <!-- Rosbag: -->
+    <group if="$(arg enable_rosbag_recording)">
+        <node 
+        pkg="rosbag" 
+        type="record" 
+        name="rosbag"
+        ns="/$(arg robot_name)/oculus_mapping"
+        output="screen"
+        args="
+        /$(arg robot_name)/oculus_mapping/is_initialized
+        /$(arg robot_name)/teleoperation/input_pose
+        /$(arg robot_name)/teleoperation/tracking_button
+        /$(arg robot_name)/teleoperation/mode_button
+        /$(arg robot_name)/teleoperation/gripper_button
+        -o $(find kinova_positional_control)/bagfiles/oculus_mapping/$(arg robot_name)
+        ">
+        </node>    
+    </group>
 </launch>
