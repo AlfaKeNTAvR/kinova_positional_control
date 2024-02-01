@@ -21,7 +21,7 @@
     <!-- If set to "true" enable rosbag recording of nodes' outputs. -->
     <arg 
     name="enable_rosbag_recording" 
-    default="true"/>
+    default="false"/>
 
     <!-- ======================== END OF SETTINGS ========================== -->
 
