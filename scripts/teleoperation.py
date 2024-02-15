@@ -143,11 +143,11 @@ class KinovaTeleoperation:
 
         # # Service subscriber:
         self.__gripper_force_grasping = rospy.ServiceProxy(
-            f'/{self.ROBOT_NAME}/gripper/force_grasping',
+            f'/{self.ROBOT_NAME}/gripper_control/force_grasping',
             GripperForceGrasping,
         )
         self.__gripper_position = rospy.ServiceProxy(
-            f'/{self.ROBOT_NAME}/gripper/position',
+            f'/{self.ROBOT_NAME}/gripper_control/position',
             GripperPosition,
         )
         # self.__stop_arm = rospy.ServiceProxy(
