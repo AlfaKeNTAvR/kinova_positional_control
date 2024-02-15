@@ -381,10 +381,8 @@ class KinovaTrajectory:
             if self.__dependency_status_topics[key].get_num_connections() != 1:
                 if self.__dependency_status[key]:
                     rospy.logerr(
-                        (
-                            f'/{self.ROBOT_NAME}{self.NODE_NAME}: '
-                            f'lost connection to {key}!'
-                        )
+                        (f'{self.NODE_NAME}: '
+                         f'lost connection to {key}!')
                     )
 
                     # # Emergency actions on lost connection:
@@ -405,7 +403,7 @@ class KinovaTrajectory:
             rospy.logwarn_throttle(
                 15,
                 (
-                    f'/{self.ROBOT_NAME}{self.NODE_NAME}:'
+                    f'{self.NODE_NAME}:'
                     f'{waiting_for}'
                     # f'\nMake sure those dependencies are running properly!'
                 ),
@@ -419,9 +417,7 @@ class KinovaTrajectory:
         # NOTE: Add more initialization criterea if needed.
         if (self.__dependency_initialized):
             if not self.__is_initialized:
-                rospy.loginfo(
-                    f'\033[92m/{self.ROBOT_NAME}{self.NODE_NAME}: ready.\033[0m',
-                )
+                rospy.loginfo(f'\033[92m{self.NODE_NAME}: ready.\033[0m',)
 
                 self.__is_initialized = True
 
@@ -682,17 +678,13 @@ class KinovaTrajectory:
         
         """
 
-        rospy.loginfo_once(
-            f'/{self.ROBOT_NAME}{self.NODE_NAME}: node is shutting down...',
-        )
+        rospy.loginfo_once(f'{self.NODE_NAME}: node is shutting down...',)
 
         # NOTE: Add code, which needs to be executed on nodes' shutdown here.
         # Publishing to topics is not guaranteed, use service calls or
         # set parameters instead.
 
-        rospy.loginfo_once(
-            f'/{self.ROBOT_NAME}{self.NODE_NAME}: node has shut down.',
-        )
+        rospy.loginfo_once(f'{self.NODE_NAME}: node has shut down.',)
 
 
 def define_waypoint(

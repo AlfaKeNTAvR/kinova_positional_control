@@ -6,6 +6,10 @@
     name="robot_name" 
     default="my_gen3"/>
 
+    <arg 
+    name="image_rotation" 
+    default="90"/>
+
     <!-- ======================== END OF SETTINGS ========================== -->
     
     <group ns="/$(arg robot_name)">
@@ -18,6 +22,9 @@
             <param 
             name="robot_name" 
             value="$(arg robot_name)"/>
+            <param 
+            name="image_rotation" 
+            value="$(arg image_rotation)"/>
         </node>     
     </group>
 </launch>

@@ -11,7 +11,10 @@ Author (s):
 
 import rospy
 
-from std_msgs.msg import (Bool)
+from std_msgs.msg import (
+    Bool,
+    Float32,
+)
 
 from kortex_driver.msg import (
     BaseCyclic_Feedback,
@@ -44,9 +47,11 @@ class KinovaGripperControl:
         self.ROBOT_NAME = robot_name
 
         # # Private variables:
-        self.__gripper_current = 0.0
         self.__activate_force_grasping = False
         self.__target_gripper_current = 0.0
+        self.__gripper_current_feedback = 0.0
+        self.__gripper_position_feedback = 0.0
+        self.__gripper_velocity_feedback = 0.0
 
         # # Public variables:
 
@@ -83,6 +88,16 @@ class KinovaGripperControl:
         )
 
         # # Topic publisher:
+        self.__gripper_position = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/gripper/position_feedback',
+            Float32,
+            queue_size=1,
+        )
+        self.__gripper_velocity = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/gripper/velocity_feedback',
+            Float32,
+            queue_size=1,
+        )
 
         # # Topic subscriber:
         self.__kortex_feedback = rospy.Subscriber(
@@ -146,9 +161,19 @@ class KinovaGripperControl:
                 ),
             )
 
-        self.__gripper_current = (
+        self.__gripper_current_feedback = (
             message.interconnect.oneof_tool_feedback.gripper_feedback[0].
             motor[0].current_motor
+        )
+
+        self.__gripper_position_feedback = (
+            message.interconnect.oneof_tool_feedback.gripper_feedback[0].
+            motor[0].position / 100
+        )
+
+        self.__gripper_velocity_feedback = (
+            message.interconnect.oneof_tool_feedback.gripper_feedback[0].
+            motor[0].velocity / 100
         )
 
     # # Private methods:
@@ -258,7 +283,9 @@ class KinovaGripperControl:
 
             # Close the gripper until the current raises to a value higher than
             # 0.04, indicating contact with an object.
-            if (self.__gripper_current < self.__target_gripper_current):
+            if (
+                self.__gripper_current_feedback < self.__target_gripper_current
+            ):
                 # Close the gripper using a velocity command.
                 self.__gripper_control(
                     mode=2,
@@ -286,6 +313,8 @@ class KinovaGripperControl:
             return
 
         self.__gripper_force_grasping()
+        self.__gripper_position.publish(self.__gripper_position_feedback)
+        self.__gripper_velocity.publish(self.__gripper_velocity_feedback)
 
     def node_shutdown(self):
         """

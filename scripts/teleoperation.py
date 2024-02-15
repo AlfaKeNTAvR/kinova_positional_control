@@ -616,7 +616,7 @@ def main():
 
     maximum_input_change = rospy.get_param(
         param_name=f'{rospy.get_name()}/maximum_input_change',
-        default=0.1,
+        default=0.4,
     )
 
     convenience_compensation = literal_eval(
