@@ -23,14 +23,13 @@ from geometry_msgs.msg import (Pose)
 from sensor_msgs.msg import (JointState)
 
 from kortex_driver.msg import (
-    BaseCyclic_Feedback,
     Twist,
     TwistCommand,
+    JointAngles,
 )
 from kortex_driver.srv import (
     Stop,
     Base_ClearFaults,
-    # ApplyEmergencyStop,
 )
 from kinova_positional_control.srv import (PidVelocityLimit)
 from relaxed_ik_ros1.msg import (EEPoseGoals)
@@ -53,6 +52,9 @@ class KinovaPositionalControl:
         """
 
         # # Private constants:
+        self.__RELAXED_IK_STARTING_CONFIG = (
+            np.array([0.0, 0.2619, 3.1415, -2.2690, 0.0, 0.9598, 1.5707])
+        )
 
         # # Public constants:
         self.ROBOT_NAME = robot_name
@@ -101,17 +103,19 @@ class KinovaPositionalControl:
             )
         )
 
-        # self.WORKSPACE_CENTER = np.negative(ee_starting_position)
-        # self.WORKSPACE_RADIUS = workspace_radius
-
         # # Private variables:
         self.__is_homed = False
         self.__is_motion_finished = True
 
-        # # Public variables:
+        # Homing timeout timer.
+        self.__homing_timeout = {
+            'timer': None,
+            'is_timer_running': False,
+            'is_timed_out': False,
+        }
 
         # Input pose in Global and Relaxed IK coordinate systems.
-        self.input_pose = {
+        self.__input_pose = {
             'gcs':
                 {
                     'position': np.array([0.0, 0.0, 0.0]),
@@ -119,9 +123,8 @@ class KinovaPositionalControl:
                 },
         }
 
-        # Last commanded Relaxed IK pose is required to compensate controller
-        # input.
-        self.last_relaxed_ik_pose = {
+        # Last commanded Relaxed IK pose.
+        self.__last_relaxed_ik_pose = {
             'gcs':
                 {
                     'position': np.array([0.0, 0.0, 0.0]),
@@ -134,8 +137,8 @@ class KinovaPositionalControl:
                 }
         }
 
-        # Pose, which is received directly from Kinova feedback.
-        self.kinova_feedback_pose = {
+        # Forward Kinematics pose.
+        self.__forward_kinematics_pose = {
             'kcs':
                 {
                     'position': np.array([0.0, 0.0, 0.0]),
@@ -149,7 +152,7 @@ class KinovaPositionalControl:
         }
         self.__kinova_joint_positions_feedback = np.zeros(7)
 
-        # # Calculate screw axes:
+        # Calculate screw axes:
         w = np.zeros([3, 7])
         v = np.zeros([3, 7])
 
@@ -208,23 +211,40 @@ class KinovaPositionalControl:
             ]
         )
 
-        # Difference between kinova and relaxed_ik CS origins on start up.
-        self.kcs_rikcs_difference = {
+        # From Kinova CS (KCS) to Relaxed IK CS (RIKCS) for pose misalignment
+        # calculation.
+        self.__kcs_rikcs_difference = {
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
 
-        # Linear missalignment between Kinova and Relaxed IK.
-        self.kinova_relaxed_ik_missalignment = {
+        # Forward Kinematics solution in Relaxed IK starting configuration,
+        # where Relaxed IK pose is [0, 0, 0], [1, 0, 0, 0].
+        forward_kinematics = self.__forward_kinematics(
+            self.__screw_axes,
+            self.__home_configuration,
+            self.__RELAXED_IK_STARTING_CONFIG,
+        )
+
+        self.__kcs_rikcs_difference['position'] = (
+            forward_kinematics[0:3, 3] - np.array([0, 0, 0])
+        )
+        self.__kcs_rikcs_difference['orientation'] = (
+            transformations.quaternion_multiply(
+                transformations.quaternion_inverse(
+                    transformations.quaternion_from_matrix(forward_kinematics)
+                ),
+                np.array([1, 0, 0, 0]),
+            )
+        )
+
+        # Forward Kinematics - Relaxed IK pose misalignment in RIKCS.
+        self.__kinova_relaxed_ik_misalignment = {
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
 
-        self.__homing_timeout = {
-            'timer': None,
-            'is_timer_running': False,
-            'is_timed_out': False,
-        }
+        # # Public variables:
 
         # # Initialization and dependency status topics:
         self.__is_initialized = False
@@ -300,7 +320,7 @@ class KinovaPositionalControl:
             queue_size=1,
         )
 
-        self.__kinova_relaxed_ik_missalignment = rospy.Publisher(
+        self.__misalignment = rospy.Publisher(
             f'/{self.ROBOT_NAME}/positional_control/kinova_relaxed_ik_missalignment',
             Pose,
             queue_size=1,
@@ -348,14 +368,14 @@ class KinovaPositionalControl:
         
         """
 
-        self.input_pose['gcs']['position'][0] = msg.position.x
-        self.input_pose['gcs']['position'][1] = msg.position.y
-        self.input_pose['gcs']['position'][2] = msg.position.z
+        self.__input_pose['gcs']['position'][0] = msg.position.x
+        self.__input_pose['gcs']['position'][1] = msg.position.y
+        self.__input_pose['gcs']['position'][2] = msg.position.z
 
-        self.input_pose['gcs']['orientation'][0] = msg.orientation.w
-        self.input_pose['gcs']['orientation'][1] = msg.orientation.x
-        self.input_pose['gcs']['orientation'][2] = msg.orientation.y
-        self.input_pose['gcs']['orientation'][3] = msg.orientation.z
+        self.__input_pose['gcs']['orientation'][0] = msg.orientation.w
+        self.__input_pose['gcs']['orientation'][1] = msg.orientation.x
+        self.__input_pose['gcs']['orientation'][2] = msg.orientation.y
+        self.__input_pose['gcs']['orientation'][3] = msg.orientation.z
 
     def __pid_motion_finished_callback(self, msg):
         """
@@ -381,23 +401,24 @@ class KinovaPositionalControl:
             self.__kinova_joint_positions_feedback,
         )
 
-        self.kinova_feedback_pose['kcs']['position'] = (
+        self.__forward_kinematics_pose['kcs']['position'] = (
             forward_kinematics[0:3, 3]
         )
 
-        self.kinova_feedback_pose['kcs']['orientation'] = (
+        self.__forward_kinematics_pose['kcs']['orientation'] = (
             transformations.quaternion_from_matrix(forward_kinematics)
         )
 
         if self.__is_homed:
-            self.kinova_feedback_pose['rikcs']['position'] = (
-                self.kinova_feedback_pose['kcs']['position']
-                - self.kcs_rikcs_difference['position']
+            # Convert Forward Kinematics from KCS to RIKCS.
+            self.__forward_kinematics_pose['rikcs']['position'] = (
+                self.__forward_kinematics_pose['kcs']['position']
+                - self.__kcs_rikcs_difference['position']
             )
-            self.kinova_feedback_pose['rikcs']['orientation'] = (
+            self.__forward_kinematics_pose['rikcs']['orientation'] = (
                 transformations.quaternion_multiply(
-                    self.kinova_feedback_pose['kcs']['orientation'],
-                    self.kcs_rikcs_difference['orientation'],
+                    self.__forward_kinematics_pose['kcs']['orientation'],
+                    self.__kcs_rikcs_difference['orientation'],
                 )
             )
 
@@ -556,7 +577,7 @@ class KinovaPositionalControl:
         rospy.logwarn(
             f'/{self.ROBOT_NAME}/positional_control: '
             'safe Z homing timed out!\n'
-            f'- Current Z position: {round(self.kinova_feedback_pose["kcs"]["position"][2], 3)}\n'
+            f'- Current Z position: {round(self.__forward_kinematics_pose["kcs"]["position"][2], 3)}\n'
             f'- Target (safe) Z position: {round(self.SAFE_HOMING_Z, 3)}\n'
         )
 
@@ -584,16 +605,16 @@ class KinovaPositionalControl:
             rospy.logwarn(
                 f'/{self.ROBOT_NAME}/positional_control: '
                 'moving to safe Z before homing...\n'
-                f'- Current Z position: {round(self.kinova_feedback_pose["kcs"]["position"][2], 3)}\n'
+                f'- Current Z position: {round(self.__forward_kinematics_pose["kcs"]["position"][2], 3)}\n'
                 f'- Target (safe) Z position: {round(self.SAFE_HOMING_Z, 3)}\n'
             )
 
             if (
                 self.SAFE_HOMING_Z >
-                self.kinova_feedback_pose['kcs']['position'][2]
+                self.__forward_kinematics_pose['kcs']['position'][2]
             ):
                 while (
-                    self.kinova_feedback_pose['kcs']['position'][2] <
+                    self.__forward_kinematics_pose['kcs']['position'][2] <
                     self.SAFE_HOMING_Z
                 ):
                     self.__publish_cartesian_z_velocity(0.05)
@@ -604,10 +625,10 @@ class KinovaPositionalControl:
 
             elif (
                 self.SAFE_HOMING_Z <
-                self.kinova_feedback_pose['kcs']['position'][2]
+                self.__forward_kinematics_pose['kcs']['position'][2]
             ):
                 while (
-                    self.kinova_feedback_pose['kcs']['position'][2] >
+                    self.__forward_kinematics_pose['kcs']['position'][2] >
                     self.SAFE_HOMING_Z
                 ):
                     self.__publish_cartesian_z_velocity(-0.05)
@@ -631,8 +652,8 @@ class KinovaPositionalControl:
         rospy.sleep(2)
 
         # Starting pose.
-        self.input_pose['gcs'] = copy.deepcopy(self.STARTING_POSE)
-        self.__set_target_pose(self.input_pose['gcs'], 'gcs')
+        self.__input_pose['gcs'] = copy.deepcopy(self.STARTING_POSE)
+        self.__set_target_pose(self.__input_pose['gcs'], 'gcs')
         self.__wait_for_motion()
 
         rospy.loginfo(
@@ -640,37 +661,6 @@ class KinovaPositionalControl:
         )
 
         self.__pid_velocity_limit(1.0)
-
-        # Let the position stabilize.
-        rospy.sleep(2)
-
-        # Calculate Kinova to Relaxed IK misalignment.
-        self.kcs_rikcs_difference['position'] = (
-            self.kinova_feedback_pose['kcs']['position']
-            - self.last_relaxed_ik_pose['rikcs']['position']
-        )
-        self.kcs_rikcs_difference['orientation'] = (
-            transformations.quaternion_multiply(
-                transformations.quaternion_inverse(
-                    self.kinova_feedback_pose['kcs']['orientation']
-                ),
-                self.last_relaxed_ik_pose['rikcs']['orientation'],
-            )
-        )
-
-        rospy.loginfo(
-            f'/{self.ROBOT_NAME}/positional_control:'
-            f'\n- Pose (kcs):'
-            f'\n  - position:    {self.kinova_feedback_pose["kcs"]["position"].round(3)}'
-            f'\n  - orientation: {self.kinova_feedback_pose["kcs"]["orientation"].round(3)}'
-            f'\n- Pose (rikcs):'
-            f'\n  - position:    {self.last_relaxed_ik_pose["rikcs"]["position"].round(3)}'
-            f'\n  - orientation: {self.last_relaxed_ik_pose["rikcs"]["orientation"].round(3)}'
-            f'\n- Pose misalignment:'
-            f'\n  - position:    {self.kcs_rikcs_difference["position"].round(3)}'
-            f'\n  - orientation: {self.kcs_rikcs_difference["orientation"].round(3)}'
-            f'\n'
-        )
 
         self.__is_homed = True
 
@@ -700,16 +690,16 @@ class KinovaPositionalControl:
         #     target_pose['position']
         # )
 
-        self.last_relaxed_ik_pose['gcs'] = copy.deepcopy(target_pose)
-        self.last_relaxed_ik_pose['rikcs'] = copy.deepcopy(target_pose)
+        self.__last_relaxed_ik_pose['gcs'] = copy.deepcopy(target_pose)
+        self.__last_relaxed_ik_pose['rikcs'] = copy.deepcopy(target_pose)
 
         if coordinate_system == 'gcs':
             # Update target pose in Relaxed IK CS.
-            self.last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
+            self.__last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
                 self.ROTATE_GCS_TO_RIKCS[0:3, 0:3],
                 target_pose['position'],
             )
-            self.last_relaxed_ik_pose['rikcs']['orientation'] = (
+            self.__last_relaxed_ik_pose['rikcs']['orientation'] = (
                 transformations.quaternion_multiply(
                     transformations.quaternion_from_matrix(
                         self.ROTATE_GCS_TO_RIKCS
@@ -725,11 +715,11 @@ class KinovaPositionalControl:
             )
 
             # Update target pose in Global IK CS.
-            self.last_relaxed_ik_pose['gcs']['position'] = np.matmul(
+            self.__last_relaxed_ik_pose['gcs']['position'] = np.matmul(
                 self.ROTATE_RIKCS_TO_GCS[0:3, 0:3],
                 target_pose['position'],
             )
-            self.last_relaxed_ik_pose['gcs']['orientation'] = (
+            self.__last_relaxed_ik_pose['gcs']['orientation'] = (
                 transformations.quaternion_multiply(
                     transformations.quaternion_from_matrix(
                         self.ROTATE_RIKCS_TO_GCS
@@ -743,13 +733,13 @@ class KinovaPositionalControl:
 
         # Form a message for the right arm.
         right_arm_pose_rikcs = self.__compose_pose_message(
-            self.last_relaxed_ik_pose['rikcs']
+            self.__last_relaxed_ik_pose['rikcs']
         )
 
         # TODO: Add left arm support.
         # Form a message for the left arm.
         left_arm_pose_rikcs = self.__compose_pose_message(
-            self.last_relaxed_ik_pose['rikcs']
+            self.__last_relaxed_ik_pose['rikcs']
         )
 
         # Form a message for the relaxed IK setpoint topic.
@@ -760,50 +750,50 @@ class KinovaPositionalControl:
 
         self.__relaxed_ik_target_rikcs.publish(ee_pose_goals)
 
-    def __publish_kinova_relaxed_ik_missalignment(self):
+    def __publish_kinova_relaxed_ik_misalignment(self):
         """
         
         """
 
-        self.kinova_relaxed_ik_missalignment['position'] = np.round(
-            self.last_relaxed_ik_pose['rikcs']['position']
-            - self.kinova_feedback_pose['rikcs']['position'],
+        self.__kinova_relaxed_ik_misalignment['position'] = np.round(
+            self.__last_relaxed_ik_pose['rikcs']['position']
+            - self.__forward_kinematics_pose['rikcs']['position'],
             3,
         )
-        self.kinova_relaxed_ik_missalignment['orientation'] = np.round(
+        self.__kinova_relaxed_ik_misalignment['orientation'] = np.round(
             transformations.quaternion_multiply(
                 transformations.quaternion_inverse(
-                    self.last_relaxed_ik_pose['rikcs']['orientation']
+                    self.__last_relaxed_ik_pose['rikcs']['orientation']
                 ),
-                self.kinova_feedback_pose['rikcs']['orientation'],
+                self.__forward_kinematics_pose['rikcs']['orientation'],
             ),
             3,
         )
 
         pose_message = Pose()
         pose_message.position.x = (
-            self.kinova_relaxed_ik_missalignment['position'][0]
+            self.__kinova_relaxed_ik_misalignment['position'][0]
         )
         pose_message.position.y = (
-            self.kinova_relaxed_ik_missalignment['position'][1]
+            self.__kinova_relaxed_ik_misalignment['position'][1]
         )
         pose_message.position.z = (
-            self.kinova_relaxed_ik_missalignment['position'][2]
+            self.__kinova_relaxed_ik_misalignment['position'][2]
         )
         pose_message.orientation.w = (
-            self.kinova_relaxed_ik_missalignment['orientation'][0]
+            self.__kinova_relaxed_ik_misalignment['orientation'][0]
         )
         pose_message.orientation.x = (
-            self.kinova_relaxed_ik_missalignment['orientation'][1]
+            self.__kinova_relaxed_ik_misalignment['orientation'][1]
         )
         pose_message.orientation.y = (
-            self.kinova_relaxed_ik_missalignment['orientation'][2]
+            self.__kinova_relaxed_ik_misalignment['orientation'][2]
         )
         pose_message.orientation.z = (
-            self.kinova_relaxed_ik_missalignment['orientation'][3]
+            self.__kinova_relaxed_ik_misalignment['orientation'][3]
         )
 
-        self.__kinova_relaxed_ik_missalignment.publish(pose_message)
+        self.__misalignment.publish(pose_message)
 
     def __calculate_skew_symmetric_matrix(self, omega):
         """
@@ -946,17 +936,17 @@ class KinovaPositionalControl:
         if not self.__is_initialized:
             return
 
-        self.__set_target_pose(self.input_pose['gcs'], 'gcs')
+        self.__set_target_pose(self.__input_pose['gcs'], 'gcs')
 
         # Publish a commanded target position in Global CS.
         self.__relaxed_ik_commanded_gcs.publish(
-            self.__compose_pose_message(self.last_relaxed_ik_pose['gcs'])
+            self.__compose_pose_message(self.__last_relaxed_ik_pose['gcs'])
         )
         self.__kinova_forward_kinematics.publish(
-            self.__compose_pose_message(self.kinova_feedback_pose['kcs'])
+            self.__compose_pose_message(self.__forward_kinematics_pose['kcs'])
         )
 
-        self.__publish_kinova_relaxed_ik_missalignment()
+        self.__publish_kinova_relaxed_ik_misalignment()
 
     def node_shutdown(self):
         """
