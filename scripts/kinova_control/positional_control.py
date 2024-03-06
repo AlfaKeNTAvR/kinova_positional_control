@@ -20,6 +20,7 @@ from threading import (Timer)
 from std_msgs.msg import (Bool)
 from std_srvs.srv import (SetBool)
 from geometry_msgs.msg import (Pose)
+from sensor_msgs.msg import (JointState)
 
 from kortex_driver.msg import (
     BaseCyclic_Feedback,
@@ -46,8 +47,6 @@ class KinovaPositionalControl:
         mounting_angles_deg,
         safe_homing_z,
         starting_pose,
-        # ee_starting_position=(0.57, 0.0, 0.43),
-        # workspace_radius=1.2,
     ):
         """
         
@@ -148,6 +147,66 @@ class KinovaPositionalControl:
                     'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
                 },
         }
+        self.__kinova_joint_positions_feedback = np.zeros(7)
+
+        # # Calculate screw axes:
+        w = np.zeros([3, 7])
+        v = np.zeros([3, 7])
+
+        w[:, 1] = np.array([0, 1, 0])
+        v[:, 1] = (
+            -self.__calculate_skew_symmetric_matrix(w[:, 1])
+            @ np.array([0, 0, (156.4 + 128.4) / 1000])
+        )
+
+        w[:, 2] = np.array([0, 0, -1])
+        v[:, 2] = (
+            -self.__calculate_skew_symmetric_matrix(w[:, 2])
+            @ np.array([0, -(5.4 + 6.4) / 1000, 0])
+        )
+
+        w[:, 3] = np.array([0, 1, 0])
+        v[:, 3] = (
+            -self.__calculate_skew_symmetric_matrix(w[:, 3])
+            @ np.array([0, 0, (156.4 + 128.4 + 210.4 + 210.4) / 1000])
+        )
+
+        w[:, 4] = np.array([0, 0, -1])
+        v[:, 4] = (
+            -self.__calculate_skew_symmetric_matrix(w[:, 4])
+            @ np.array([0, -(5.4 + 6.4 + 6.4 + 6.4) / 1000, 0])
+        )
+
+        w[:, 5] = np.array([0, 1, 0])
+        v[:, 5] = (
+            -self.__calculate_skew_symmetric_matrix(w[:, 5]) @ np.array(
+                [0, 0, (156.4 + 128.4 + 210.4 + 210.4 + 208.4 + 105.9) / 1000]
+            )
+        )
+
+        w[:, 6] = np.array([0, 0, -1])
+        v[:, 6] = (
+            (
+                -self.__calculate_skew_symmetric_matrix(w[:, 6])
+                @ np.array([0, -(5.4 + 6.4 + 6.4 + 6.4) / 1000, 0])
+            )
+        )
+
+        self.__screw_axes = np.zeros([6, 7])
+        self.__screw_axes[:, 0] = np.array([0, 0, -1, 0, 0, 0])
+
+        for i in range(1, 7):
+            self.__screw_axes[:, i] = np.concatenate((w[:, i], v[:, i]))
+
+        # Home configuration matrix.
+        self.__home_configuration = np.array(
+            [
+                [1, 0, 0, 0],
+                [0, 1, 0, -0.025],
+                [0, 0, 1, 1.1873 + 0.120],  # 0.120 for the gripper.
+                [0, 0, 0, 1],
+            ]
+        )
 
         # Difference between kinova and relaxed_ik CS origins on start up.
         self.kcs_rikcs_difference = {
@@ -229,6 +288,11 @@ class KinovaPositionalControl:
             Pose,
             queue_size=1,
         )
+        self.__kinova_forward_kinematics = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/positional_control/commanded_pose_kcs',
+            Pose,
+            queue_size=1,
+        )
 
         self.__kinova_cartesian_velocity = rospy.Publisher(
             f'/{self.ROBOT_NAME}/in/cartesian_velocity',
@@ -256,9 +320,9 @@ class KinovaPositionalControl:
         )
 
         rospy.Subscriber(
-            f'/{self.ROBOT_NAME}/base_feedback',
-            BaseCyclic_Feedback,
-            self.__base_feedback_callback,
+            f'/{self.ROBOT_NAME}/base_feedback/joint_state',
+            JointState,
+            self.__joint_state_callback,
         )
 
     # # Dependency status callbacks:
@@ -303,27 +367,26 @@ class KinovaPositionalControl:
 
         self.__is_motion_finished = msg.data
 
-    def __base_feedback_callback(self, message):
+    def __joint_state_callback(self, message):
         """
         
         """
 
-        self.__kinova_feedback_z = message.base.tool_pose_z
+        self.__kinova_joint_positions_feedback = message.position[0:7]
 
-        self.kinova_feedback_pose['kcs']['position'] = np.array(
-            [
-                message.base.tool_pose_x,
-                message.base.tool_pose_y,
-                message.base.tool_pose_z,
-            ]
+        # Forward Kinematics:
+        forward_kinematics = self.__forward_kinematics(
+            self.__screw_axes,
+            self.__home_configuration,
+            self.__kinova_joint_positions_feedback,
+        )
+
+        self.kinova_feedback_pose['kcs']['position'] = (
+            forward_kinematics[0:3, 3]
         )
 
         self.kinova_feedback_pose['kcs']['orientation'] = (
-            transformations.quaternion_from_euler(
-                np.deg2rad(message.base.tool_pose_theta_x),
-                np.deg2rad(message.base.tool_pose_theta_y),
-                np.deg2rad(message.base.tool_pose_theta_z),
-            )
+            transformations.quaternion_from_matrix(forward_kinematics)
         )
 
         if self.__is_homed:
@@ -432,44 +495,6 @@ class KinovaPositionalControl:
         pose_message.orientation.z = target_pose['orientation'][3]
 
         return pose_message
-
-    # def __check_boundaries(self, position):
-    #     """
-
-    #     """
-
-    #     # Calculate the vector from the center to the position.
-    #     vector_to_position = [
-    #         position[i] - self.WORKSPACE_CENTER[i]
-    #         for i in range(len(self.WORKSPACE_CENTER))
-    #     ]
-
-    #     # Calculate the distance from the center to the position.
-    #     distance_to_position = math.sqrt(
-    #         sum([x**2 for x in vector_to_position])
-    #     )
-
-    #     # If the position is inside the sphere, return its coordinates.
-    #     if distance_to_position <= self.WORKSPACE_RADIUS:
-    #         return position
-
-    #     # Calculate the vector from the center to the closest position on the
-    #     # sphere surface.
-    #     vector_to_surface = [
-    #         vector_to_position[i] * self.WORKSPACE_RADIUS / distance_to_position
-    #         for i in range(len(self.WORKSPACE_CENTER))
-    #     ]
-
-    #     # Calculate the coordinates of the closest position on the sphere
-    #     # surface.
-    #     closest_position = np.array(
-    #         [
-    #             self.WORKSPACE_CENTER[i] + vector_to_surface[i]
-    #             for i in range(len(self.WORKSPACE_CENTER))
-    #         ]
-    #     )
-
-    #     return closest_position
 
     def __wait_for_motion(self):
         """Blocks code execution until the flag is set or a node is shut down.
@@ -616,6 +641,9 @@ class KinovaPositionalControl:
 
         self.__pid_velocity_limit(1.0)
 
+        # Let the position stabilize.
+        rospy.sleep(2)
+
         # Calculate Kinova to Relaxed IK misalignment.
         self.kcs_rikcs_difference['position'] = (
             self.kinova_feedback_pose['kcs']['position']
@@ -628,6 +656,20 @@ class KinovaPositionalControl:
                 ),
                 self.last_relaxed_ik_pose['rikcs']['orientation'],
             )
+        )
+
+        rospy.loginfo(
+            f'/{self.ROBOT_NAME}/positional_control:'
+            f'\n- Pose (kcs):'
+            f'\n  - position:    {self.kinova_feedback_pose["kcs"]["position"].round(3)}'
+            f'\n  - orientation: {self.kinova_feedback_pose["kcs"]["orientation"].round(3)}'
+            f'\n- Pose (rikcs):'
+            f'\n  - position:    {self.last_relaxed_ik_pose["rikcs"]["position"].round(3)}'
+            f'\n  - orientation: {self.last_relaxed_ik_pose["rikcs"]["orientation"].round(3)}'
+            f'\n- Pose misalignment:'
+            f'\n  - position:    {self.kcs_rikcs_difference["position"].round(3)}'
+            f'\n  - orientation: {self.kcs_rikcs_difference["orientation"].round(3)}'
+            f'\n'
         )
 
         self.__is_homed = True
@@ -763,6 +805,133 @@ class KinovaPositionalControl:
 
         self.__kinova_relaxed_ik_missalignment.publish(pose_message)
 
+    def __calculate_skew_symmetric_matrix(self, omega):
+        """
+            
+        """
+
+        return np.array(
+            [
+                [0, -omega[2], omega[1]],
+                [omega[2], 0, -omega[0]],
+                [-omega[1], omega[0], 0],
+            ]
+        )
+
+    def __axis_to_angle_rotation(self, omega, theta):
+        """
+        
+        """
+
+        omega_skew_symmetric = self.__calculate_skew_symmetric_matrix(omega)
+
+        rotation = (
+            np.eye(3) + np.sin(theta) * omega_skew_symmetric +
+            (1 - np.cos(theta)) * omega_skew_symmetric @ omega_skew_symmetric
+        )
+
+        return rotation
+
+    def __twist_to_homogeneous_transfomation(self, screw_axis, theta):
+        """
+        
+        """
+
+        omega = screw_axis[0:3]
+        v = screw_axis[3:6]
+
+        omega_skew_symmetric = self.__calculate_skew_symmetric_matrix(omega)
+
+        # rotation = axis_angle_to_rotation(omega, angle)
+        translation = np.array(
+            theta * np.eye(3) + (1 - np.cos(theta)) * omega_skew_symmetric
+            + (theta - np.sin(theta)) * omega_skew_symmetric
+            @ omega_skew_symmetric
+        ) @ v
+
+        transformation = np.zeros([4, 4])
+        transformation[0:3, 0:3] = self.__axis_to_angle_rotation(omega, theta)
+        transformation[0:3, 3] = translation
+        transformation[3, 3] = 1
+
+        return transformation
+
+    def __calculate_adjoint_transformation(self, transformation):
+        """
+            
+        """
+
+        rotation = transformation[0:3, 0:3]
+        translation = transformation[0:3, 3]
+        adjoint_transformation = np.zeros([6, 6])
+
+        skew_symmetric_translation = self.__calculate_skew_symmetric_matrix(
+            translation.T
+        )
+        adjoint_transformation[0:3, 0:3] = rotation
+        adjoint_transformation[3:6, 0:3] = skew_symmetric_translation @ rotation
+        adjoint_transformation[3:6, 3:6] = rotation
+
+        return adjoint_transformation
+
+    def __calculate_jacobian(self, screw_axes, joint_angles):
+        """
+            
+        """
+
+        jacobian = np.zeros([6, len(joint_angles)])
+        adjoint_transformations = np.zeros([6, 6, len(joint_angles) - 1])
+
+        jacobian[:, 0] = screw_axes[:, 0]
+
+        for i in range(1, len(joint_angles)):
+            transformation = self.__twist_to_homogeneous_transfomation(
+                screw_axes[:, i - 1],
+                joint_angles[i - 1],
+            )
+            adjoint_transformations[:, :, i - 1] = (
+                self.__calculate_adjoint_transformation(transformation)
+            )
+            final_adjoint_transformation = adjoint_transformations[:, :, 0]
+
+            for j in range(1, i):
+                final_adjoint_transformation = (
+                    final_adjoint_transformation
+                    @ adjoint_transformations[:, :, j]
+                )
+
+            jacobian[:, i] = (final_adjoint_transformation @ screw_axes[:, i])
+
+        return jacobian
+
+    def __forward_kinematics(
+        self,
+        screw_axes,
+        home_configuration,
+        joint_angles,
+    ):
+        """
+
+        """
+
+        forward_kinematics = np.zeros([4, 4])
+
+        for i in range(0, 7):
+            transformation = self.__twist_to_homogeneous_transfomation(
+                screw_axes[:, i],
+                joint_angles[i],
+            )
+
+            if i == 0:
+                forward_kinematics = transformation
+
+            else:
+                forward_kinematics = forward_kinematics @ transformation
+
+        forward_kinematics = forward_kinematics @ home_configuration
+
+        return forward_kinematics
+
     # # Public methods:
     def main_loop(self):
         """
@@ -782,6 +951,9 @@ class KinovaPositionalControl:
         # Publish a commanded target position in Global CS.
         self.__relaxed_ik_commanded_gcs.publish(
             self.__compose_pose_message(self.last_relaxed_ik_pose['gcs'])
+        )
+        self.__kinova_forward_kinematics.publish(
+            self.__compose_pose_message(self.kinova_feedback_pose['kcs'])
         )
 
         self.__publish_kinova_relaxed_ik_missalignment()
