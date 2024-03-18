@@ -27,10 +27,7 @@ from kortex_driver.msg import (
     TwistCommand,
     JointAngles,
 )
-from kortex_driver.srv import (
-    Stop,
-    Base_ClearFaults,
-)
+from kortex_driver.srv import (Stop)
 from kinova_positional_control.srv import (PidVelocityLimit)
 from relaxed_ik_ros1.msg import (EEPoseGoals)
 
@@ -291,10 +288,6 @@ class KinovaPositionalControl:
         self.__stop_arm = rospy.ServiceProxy(
             f'/{self.ROBOT_NAME}/base/stop',
             Stop,
-        )
-        self.__clear_arm_faults = rospy.ServiceProxy(
-            f'/{self.ROBOT_NAME}/base/clear_faults',
-            Base_ClearFaults,
         )
 
         # # Topic publisher:
@@ -593,8 +586,6 @@ class KinovaPositionalControl:
         rospy.loginfo(
             f'/{self.ROBOT_NAME}/positional_control: dependencies have initialized.',
         )
-
-        self.__clear_arm_faults()
 
         # Move to a safe Z position before homing.
         # TODO: Add upper limit.

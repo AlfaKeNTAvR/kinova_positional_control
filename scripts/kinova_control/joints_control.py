@@ -24,7 +24,10 @@ from kortex_driver.msg import (
     JointSpeed,
     JointAngles,
 )
-from kortex_driver.srv import (Stop)
+from kortex_driver.srv import (
+    Stop,
+    Base_ClearFaults,
+)
 from kinova_positional_control.srv import (PidVelocityLimit)
 
 
@@ -108,6 +111,10 @@ class KinovaJointsControl:
         )
 
         # # Service subscriber:
+        self.__clear_arm_faults = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/base/clear_faults',
+            Base_ClearFaults,
+        )
         self.__stop_arm_srv = rospy.ServiceProxy(
             f'/{self.ROBOT_NAME}/base/stop',
             Stop,
@@ -432,6 +439,7 @@ class KinovaJointsControl:
                     f'\033[92m/{self.ROBOT_NAME}/joints_control: ready.\033[0m',
                 )
 
+                self.__clear_arm_faults()
                 self.__is_initialized = True
 
         else:
@@ -650,6 +658,9 @@ class KinovaJointsControl:
         rospy.loginfo_once(
             f'/{self.ROBOT_NAME}/joints_control: node is shutting down...',
         )
+
+        # Clear all faults
+        self.__clear_arm_faults()
 
         # Stop arm movement
         self.__stop_arm_srv()
