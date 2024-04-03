@@ -30,7 +30,7 @@
     "{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}"  -->
     <arg 
     name="starting_pose" 
-    default="{'position': [0.55, 0.35, 0.33], 'orientation': [0.0, 0.0, 0.0]}"/>
+    default="{'position': [0.55, 0.35, 0.2], 'orientation': [0.0, 0.0, 0.0]}"/>
 
     <!-- Enable chest compensation (height stabilization): when set to "true"
     the node will wait for the chest_control to home and will use WCS (GCS +
