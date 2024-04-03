@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- ============================ SETTINGS ============================= -->
+
+    <!-- Node frequency: the frequency [Hz] which rate.sleep() function will
+    attempt to maintain in the main_loop. -->
+    <arg 
+    name="node_frequency" 
+    default="1000"/>
+
+    <arg 
+    name="robot_name" 
+    default="my_gen3"/>
+
+    <!-- Max linear speed: in [meters]. -->
+    <arg 
+    name="max_linear_speed" 
+    default="0.2"/>
+
+    <!-- Max angular speed: in [degrees].  -->
+    <arg 
+    name="max_angular_speed" 
+    default="90"/>
+
+    <!-- ======================== END OF SETTINGS ========================== -->
+    
+    <group ns="/$(arg robot_name)">
+        <!-- Trajectory planner and executor: -->     
+        <node 
+        pkg="kinova_positional_control" 
+        type="trajectory.py"
+        name="trajectory" 
+        output="screen">
+            <param 
+            name="robot_name" 
+            value="$(arg robot_name)"/>
+            <param 
+            name="max_linear_speed" 
+            value="$(arg max_linear_speed)"/>
+            <param 
+            name="max_angular_speed" 
+            value="$(arg max_angular_speed)"/>
+        </node>     
+    </group>
+</launch>
