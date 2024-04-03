@@ -47,13 +47,6 @@
     name="maximum_input_orientation_change"
     default="8"/>
 
-    <!-- Enable Z chest compensation: EE stabilization based on the chest
-    position. Should be enabled or disabled in both teleoperation.launch and
-    positional_control.launch. -->
-    <arg 
-    name="enable_z_chest_compensation" 
-    default="false"/> 
-
 
     <!-- If any of dependency or optional subfiles should not be launched (or
     are launched separately) set corresponding argument to "false". -->
@@ -76,9 +69,6 @@
             <arg 
             name="robot_name" 
             value="$(arg robot_name)"/>
-            <arg
-            name="enable_z_chest_compensation"
-            value="$(arg enable_z_chest_compensation)"/>
         </include>
     </group>
 
@@ -110,9 +100,6 @@
             <param
             name="maximum_input_orientation_change"
             value="$(arg maximum_input_orientation_change)"/>
-            <param
-            name="enable_z_chest_compensation"
-            value="$(arg enable_z_chest_compensation)"/>
         </node>   
     </group>
 

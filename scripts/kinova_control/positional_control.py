@@ -49,7 +49,6 @@ class KinovaPositionalControl:
         mounting_angles_deg,
         safe_homing_z,
         starting_pose,
-        enable_z_chest_compensation,
         # ee_starting_position=(0.57, 0.0, 0.43),
         # workspace_radius=1.2,
     ):
@@ -255,7 +254,7 @@ class KinovaPositionalControl:
             'current': None,
             'previous': None,
         }
-        self.__enable_z_chest_compensation = enable_z_chest_compensation
+        self.__enable_z_chest_compensation = False
 
         # # Public variables:
 
@@ -1107,17 +1106,12 @@ def main():
             "{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}"
         )
     )
-    enable_z_chest_compensation = rospy.get_param(
-        param_name=f'{rospy.get_name()}/enable_z_chest_compensation',
-        default=False,
-    )
 
     pose_controller = KinovaPositionalControl(
         robot_name=kinova_name,
         mounting_angles_deg=mounting_angles_deg,
         safe_homing_z=safe_homing_z,
         starting_pose=starting_pose,
-        enable_z_chest_compensation=enable_z_chest_compensation,
     )
 
     rospy.on_shutdown(pose_controller.node_shutdown)

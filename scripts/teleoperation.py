@@ -46,7 +46,6 @@ class KinovaTeleoperation:
         convenience_compensation,
         maximum_input_position_change,
         maximum_input_orientation_change,
-        enable_z_chest_compensation,
     ):
         """
         
@@ -89,7 +88,7 @@ class KinovaTeleoperation:
         self.__tracking_service_active = False
         self.__control_mode_service_active = False
 
-        self.__enable_z_chest_compensation = enable_z_chest_compensation
+        self.__enable_z_chest_compensation = False
 
         # # Public variables:
         # Last commanded Relaxed IK pose is required to compensate controller
@@ -923,10 +922,6 @@ def main():
             default='[0.0, 0.0, 0.0]',
         )
     )
-    enable_z_chest_compensation = rospy.get_param(
-        param_name=f'{rospy.get_name()}/enable_z_chest_compensation',
-        default=False,
-    )
 
     kinova_teleoperation = KinovaTeleoperation(
         robot_name=kinova_name,
@@ -935,7 +930,6 @@ def main():
         convenience_compensation=convenience_compensation,
         maximum_input_position_change=maximum_input_position_change,
         maximum_input_orientation_change=maximum_input_orientation_change,
-        enable_z_chest_compensation=enable_z_chest_compensation,
     )
 
     rospy.on_shutdown(kinova_teleoperation.node_shutdown)
