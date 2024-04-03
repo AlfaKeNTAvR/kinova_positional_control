@@ -285,12 +285,12 @@ class OculusMapping:
         self.__teleoperation_tracking_button.publish(
             self.__oculus_buttons.grip_button
         )
-        self.__teleoperation_gripper_button.publish(
-            self.__oculus_buttons.trigger_button
-        )
-        self.__teleoperation_mode_button.publish(
-            self.__oculus_buttons.primary_button
-        )
+        # self.__teleoperation_gripper_button.publish(
+        #     self.__oculus_buttons.trigger_button
+        # )
+        # self.__teleoperation_mode_button.publish(
+        #     self.__oculus_buttons.primary_button
+        # )
 
     def node_shutdown(self):
         """
