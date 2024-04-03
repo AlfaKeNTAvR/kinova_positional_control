@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- ============================ SETTINGS ============================= -->
+
+    <!-- Node frequency: the frequency [Hz] which rate.sleep() function will
+    attempt to maintain in the main_loop. -->
+    <arg 
+    name="node_frequency" 
+    default="1000"/>
+
+
+    <!-- ======================== END OF SETTINGS ========================== -->
+    
+    <!-- Trajectory planner and executor: -->     
+    <node 
+    pkg="kinova_positional_control" 
+    type="e_stop_pedal.py"
+    name="e_stop_pedal" 
+    output="screen">
+    </node>     
+</launch>
