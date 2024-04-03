@@ -47,6 +47,11 @@
     name="maximum_input_orientation_change"
     default="8"/>
 
+    <!--  -->
+    <arg
+    name="z_clip"
+    default="true"/>
+
 
     <!-- If any of dependency or optional subfiles should not be launched (or
     are launched separately) set corresponding argument to "false". -->
@@ -100,6 +105,9 @@
             <param
             name="maximum_input_orientation_change"
             value="$(arg maximum_input_orientation_change)"/>
+            <param
+            name="z_clip"
+            value="$(arg z_clip)"/>
         </node>   
     </group>
 

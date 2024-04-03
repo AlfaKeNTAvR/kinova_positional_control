@@ -18,11 +18,9 @@ import rospy
 import numpy as np
 import transformations
 from ast import (literal_eval)
+import copy
 
-from std_msgs.msg import (
-    Bool,
-    Float32,
-)
+from std_msgs.msg import (Bool)
 from std_srvs.srv import (SetBool)
 from geometry_msgs.msg import (Pose)
 
@@ -46,6 +44,7 @@ class KinovaTeleoperation:
         convenience_compensation,
         maximum_input_position_change,
         maximum_input_orientation_change,
+        z_clip,
     ):
         """
         
@@ -57,6 +56,18 @@ class KinovaTeleoperation:
             )
 
         # # Private constants:
+        self.__INPUT_LIMITS = {
+            'gcs':
+                {
+                    'position':
+                        {
+                            'x': [0.4, 0.55],
+                            'y': [-np.inf, np.inf],
+                            'z': [0.2 - 0.4, 0.2 + 0.4],
+                        }
+                }
+        }
+        self.__Z_CLIP = z_clip
 
         # # Public constants:
         self.ROBOT_NAME = robot_name
@@ -82,6 +93,8 @@ class KinovaTeleoperation:
 
         self.__pose_tracking = False
 
+        self.__chest_position = 0.0
+
         # If the pose_tracking and control_mode are controlled through a service
         # call. These conditions are tracked to prevent manual switch with
         # buttons while in automatic mode.
@@ -92,8 +105,16 @@ class KinovaTeleoperation:
         # Last commanded Relaxed IK pose is required to compensate controller
         # input.
         self.last_relaxed_ik_pose = {
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+            'wcs':
+                {
+                    'position': np.array([0.0, 0.0, 0.0]),
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+                },
+            'gcs':
+                {
+                    'position': np.array([0.0, 0.0, 0.0]),
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+                },
         }
 
         # This difference is calculated each time the tracking is started and
@@ -194,7 +215,12 @@ class KinovaTeleoperation:
         rospy.Subscriber(
             f'/{self.ROBOT_NAME}/relaxed_ik/commanded_pose_wcs',
             Pose,
-            self.__commanded_pose_callback,
+            self.__commanded_pose_wcs_callback,
+        )
+        rospy.Subscriber(
+            f'/{self.ROBOT_NAME}/relaxed_ik/commanded_pose_gcs',
+            Pose,
+            self.__commanded_pose_gcs_callback,
         )
 
     # # Dependency status callbacks:
@@ -342,19 +368,54 @@ class KinovaTeleoperation:
 
         self.__mode_button = message.data
 
-    def __commanded_pose_callback(self, message):
+    def __commanded_pose_wcs_callback(self, message):
         """
         
         """
 
-        self.last_relaxed_ik_pose['position'][0] = message.position.x
-        self.last_relaxed_ik_pose['position'][1] = message.position.y
-        self.last_relaxed_ik_pose['position'][2] = message.position.z
+        self.last_relaxed_ik_pose['wcs']['position'][0] = message.position.x
+        self.last_relaxed_ik_pose['wcs']['position'][1] = message.position.y
+        self.last_relaxed_ik_pose['wcs']['position'][2] = message.position.z
 
-        self.last_relaxed_ik_pose['orientation'][0] = message.orientation.w
-        self.last_relaxed_ik_pose['orientation'][1] = message.orientation.x
-        self.last_relaxed_ik_pose['orientation'][2] = message.orientation.y
-        self.last_relaxed_ik_pose['orientation'][3] = message.orientation.z
+        self.last_relaxed_ik_pose['wcs']['orientation'][0] = (
+            message.orientation.w
+        )
+        self.last_relaxed_ik_pose['wcs']['orientation'][1] = (
+            message.orientation.x
+        )
+        self.last_relaxed_ik_pose['wcs']['orientation'][2] = (
+            message.orientation.y
+        )
+        self.last_relaxed_ik_pose['wcs']['orientation'][3] = (
+            message.orientation.z
+        )
+
+        self.__chest_position = (
+            self.last_relaxed_ik_pose['wcs']['position'][2]
+            - self.last_relaxed_ik_pose['gcs']['position'][2]
+        )
+
+    def __commanded_pose_gcs_callback(self, message):
+        """
+        
+        """
+
+        self.last_relaxed_ik_pose['gcs']['position'][0] = message.position.x
+        self.last_relaxed_ik_pose['gcs']['position'][1] = message.position.y
+        self.last_relaxed_ik_pose['gcs']['position'][2] = message.position.z
+
+        self.last_relaxed_ik_pose['gcs']['orientation'][0] = (
+            message.orientation.w
+        )
+        self.last_relaxed_ik_pose['gcs']['orientation'][1] = (
+            message.orientation.x
+        )
+        self.last_relaxed_ik_pose['gcs']['orientation'][2] = (
+            message.orientation.y
+        )
+        self.last_relaxed_ik_pose['gcs']['orientation'][3] = (
+            message.orientation.z
+        )
 
     # # Private methods:
     def __check_initialization(self):
@@ -540,7 +601,7 @@ class KinovaTeleoperation:
 
         self.input_relaxed_ik_difference['position'] = (
             self.__input_pose['position']
-            - self.last_relaxed_ik_pose['position']
+            - self.last_relaxed_ik_pose['wcs']['position']
         )
 
         self.input_relaxed_ik_difference['orientation'] = (
@@ -548,7 +609,7 @@ class KinovaTeleoperation:
                 transformations.quaternion_inverse(
                     self.__input_pose['orientation']
                 ),
-                self.last_relaxed_ik_pose['orientation'],
+                self.last_relaxed_ik_pose['wcs']['orientation'],
             )
         )
 
@@ -620,7 +681,7 @@ class KinovaTeleoperation:
 
         # Use fixed (last commanded) orientation.
         compensated_input_pose['orientation'] = (
-            self.last_relaxed_ik_pose['orientation']
+            self.last_relaxed_ik_pose['wcs']['orientation']
         )
 
         # Use oculus orientation.
@@ -667,12 +728,39 @@ class KinovaTeleoperation:
                     )
                 )
 
+        # Apply WCS position input limits:
+        clipped_input_pose = copy.deepcopy(compensated_input_pose)
+
+        clipped_input_pose['position'][0] = np.clip(
+            compensated_input_pose['position'][0],
+            self.__INPUT_LIMITS['gcs']['position']['x'][0],
+            self.__INPUT_LIMITS['gcs']['position']['x'][1],
+        )
+        clipped_input_pose['position'][1] = np.clip(
+            compensated_input_pose['position'][1],
+            self.__INPUT_LIMITS['gcs']['position']['y'][0],
+            self.__INPUT_LIMITS['gcs']['position']['y'][1],
+        )
+
+        if self.__Z_CLIP:
+            clipped_input_pose['position'][2] = np.clip(
+                compensated_input_pose['position'][2],
+                (
+                    self.__INPUT_LIMITS['gcs']['position']['z'][0]
+                    + self.__chest_position
+                ),
+                (
+                    self.__INPUT_LIMITS['gcs']['position']['z'][1]
+                    + self.__chest_position
+                ),
+            )
+
         # Protection against too big positional input changes. Controller loses
         # connection, goes out-of-sight, goes into a sleep mode, user input is
         # unsafe.
         input_position_difference = np.linalg.norm(
-            compensated_input_pose['position']
-            - self.last_relaxed_ik_pose['position']
+            clipped_input_pose['position']
+            - self.last_relaxed_ik_pose['wcs']['position']
         )
 
         if (input_position_difference > self.MAXIMUM_INPUT_POSITION_CHANGE):
@@ -682,8 +770,8 @@ class KinovaTeleoperation:
                 (
                     f'/{self.ROBOT_NAME}/teleoperation: '
                     f'\nChange in input POSITION exceeded maximum allowed value! '
-                    f'\n- Current input: {np.round(compensated_input_pose["position"], 3)}'
-                    f'\n- Previous input: {np.round(self.last_relaxed_ik_pose["position"], 3)}'
+                    f'\n- Current input: {np.round(clipped_input_pose["position"], 3)}'
+                    f'\n- Previous input: {np.round(self.last_relaxed_ik_pose["wcs"]["position"], 3)}'
                     f'\n- Difference (absolute): {np.round(input_position_difference, 3)}'
                     f'\n- Allowed difference threshold: {np.round(self.MAXIMUM_INPUT_POSITION_CHANGE, 3)}'
                     '\nStopped input tracking.\n'
@@ -697,9 +785,9 @@ class KinovaTeleoperation:
         # unsafe.
         input_orientation_missalignment = transformations.quaternion_multiply(
             transformations.quaternion_inverse(
-                compensated_input_pose['orientation'],
+                clipped_input_pose['orientation'],
             ),
-            self.last_relaxed_ik_pose['orientation'],
+            self.last_relaxed_ik_pose['wcs']['orientation'],
         )
 
         input_angular_difference = round(
@@ -722,8 +810,8 @@ class KinovaTeleoperation:
                 (
                     f'/{self.ROBOT_NAME}/teleoperation: '
                     f'\nChange in input ORIENTATION exceeded maximum allowed value! '
-                    f'\n- Current input: {np.round(compensated_input_pose["orientation"], 3)}'
-                    f'\n- Previous input: {np.round(self.last_relaxed_ik_pose["orientation"], 3)}'
+                    f'\n- Current input: {np.round(clipped_input_pose["orientation"], 3)}'
+                    f'\n- Previous input: {np.round(self.last_relaxed_ik_pose["wcs"]["orientation"], 3)}'
                     f'\n- Difference (absolute): {np.round(input_angular_difference, 3)}'
                     f'\n- Allowed difference threshold: {np.round(self.MAXIMUM_INPUT_ORIENTATION_CHANGE, 3)}'
                     '\nStopped input tracking.\n'
@@ -733,14 +821,14 @@ class KinovaTeleoperation:
             return
 
         pose_message = Pose()
-        pose_message.position.x = compensated_input_pose['position'][0]
-        pose_message.position.y = compensated_input_pose['position'][1]
-        pose_message.position.z = compensated_input_pose['position'][2]
+        pose_message.position.x = clipped_input_pose['position'][0]
+        pose_message.position.y = clipped_input_pose['position'][1]
+        pose_message.position.z = clipped_input_pose['position'][2]
 
-        pose_message.orientation.w = compensated_input_pose['orientation'][0]
-        pose_message.orientation.x = compensated_input_pose['orientation'][1]
-        pose_message.orientation.y = compensated_input_pose['orientation'][2]
-        pose_message.orientation.z = compensated_input_pose['orientation'][3]
+        pose_message.orientation.w = clipped_input_pose['orientation'][0]
+        pose_message.orientation.x = clipped_input_pose['orientation'][1]
+        pose_message.orientation.y = clipped_input_pose['orientation'][2]
+        pose_message.orientation.z = clipped_input_pose['orientation'][3]
 
         self.__kinova_pose.publish(pose_message)
 
@@ -830,6 +918,11 @@ def main():
         )
     )
 
+    z_clip = rospy.get_param(
+        param_name=f'{rospy.get_name()}/z_clip',
+        default=True,
+    )
+
     kinova_teleoperation = KinovaTeleoperation(
         robot_name=kinova_name,
         tracking_mode=tracking_mode,
@@ -837,6 +930,7 @@ def main():
         convenience_compensation=convenience_compensation,
         maximum_input_position_change=maximum_input_position_change,
         maximum_input_orientation_change=maximum_input_orientation_change,
+        z_clip=z_clip,
     )
 
     rospy.on_shutdown(kinova_teleoperation.node_shutdown)
