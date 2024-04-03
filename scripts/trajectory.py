@@ -21,7 +21,6 @@ from std_msgs.msg import (Bool)
 from geometry_msgs.msg import (Pose)
 from std_srvs.srv import (Trigger)
 
-from kinova_positional_control.msg import (Waypoint)
 from kinova_positional_control.srv import (UploadTrajectory)
 
 
@@ -57,7 +56,7 @@ class KinovaTrajectory:
         self.__sample_index = 0
         self.__trajectory_is_finished = True
         self.__trajectory = []
-        self.__coordinate_system = 'gcs'
+        self.__coordinate_system = 'wcs'
 
         self.__loop_frequency = copy(self.__MIN_LOOP_FREQUENCY)
 
@@ -92,10 +91,10 @@ class KinovaTrajectory:
         }
 
         # End-Effector Corrdinate System:
-        self.__gcs_to_eecs = transformations.quaternion_matrix(
+        self.__wcs_to_eecs = transformations.quaternion_matrix(
             np.array([1, 0, 0, 0])
         )
-        self.__eecs_to_gcs = transformations.inverse_matrix(self.__gcs_to_eecs)
+        self.__eecs_to_wcs = transformations.inverse_matrix(self.__wcs_to_eecs)
         self.__eecs_origin = {
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
@@ -172,7 +171,7 @@ class KinovaTrajectory:
             self.__kinova_relaxed_ik_missalignment_callback,
         )
         rospy.Subscriber(
-            f'/{self.__ROBOT_NAME}/relaxed_ik/commanded_pose_gcs',
+            f'/{self.__ROBOT_NAME}/relaxed_ik/commanded_pose_wcs',
             Pose,
             self.__commanded_pose_callback,
         )
@@ -197,17 +196,17 @@ class KinovaTrajectory:
         self.__trajectory = []
         self.__coordinate_system = request.coordinate_system
 
-        if self.__coordinate_system not in ['gcs', 'eecs']:
+        if self.__coordinate_system not in ['wcs', 'eecs']:
             response = False
 
             return response
 
         if self.__coordinate_system == 'eecs':
-            self.__eecs_to_gcs = transformations.quaternion_matrix(
+            self.__eecs_to_wcs = transformations.quaternion_matrix(
                 self.__last_relaxed_ik_pose['orientation']
             )
-            self.__gcs_to_eecs = transformations.inverse_matrix(
-                self.__eecs_to_gcs
+            self.__wcs_to_eecs = transformations.inverse_matrix(
+                self.__eecs_to_wcs
             )
             self.__eecs_origin = copy(self.__last_relaxed_ik_pose)
 
@@ -249,7 +248,7 @@ class KinovaTrajectory:
             if self.__coordinate_system == 'eecs':
                 trajectory_waypoint['pose']['position'] = (
                     self.__eecs_origin['position'] + np.matmul(
-                        self.__eecs_to_gcs[0:3, 0:3],
+                        self.__eecs_to_wcs[0:3, 0:3],
                         trajectory_waypoint['pose']['position'],
                     )
                 )
