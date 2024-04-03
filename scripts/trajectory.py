@@ -435,7 +435,16 @@ class KinovaTrajectory:
             if self.__is_initialized:
                 # NOTE (optionally): Add code, which needs to be executed if the
                 # nodes's status changes from True to False.
-                pass
+
+                # Reset the existing trajectory.
+                self.__resume_trajectory = False
+                self.__trajectory_is_finished = True
+                self.__trajectory = []
+
+                # Reset trajectory sampler and executor.
+                self.__motion_is_sampled = False
+                self.__waypoint_index = 0
+                self.__sample_index = 0
 
             self.__is_initialized = False
 
