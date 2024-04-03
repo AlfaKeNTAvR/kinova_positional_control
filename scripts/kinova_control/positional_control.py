@@ -55,6 +55,18 @@ class KinovaPositionalControl:
         """
 
         # # Private constants:
+        self.__INPUT_LIMITS = {
+            'gcs':
+                {
+                    'position':
+                        {
+                            'x': [0.4, 0.55],
+                            'y': [0.1, 0.85],
+                            'z': [0.2 - 0.4, 0.2 + 0.4],
+                        }
+                }
+        }
+
         self.__RELAXED_IK_STARTING_CONFIG = (
             np.array([0.0, 0.2619, 3.1415, -2.2690, 0.0, 0.9598, 1.5707])
         )
@@ -771,6 +783,33 @@ class KinovaPositionalControl:
                 last_relaxed_ik_pose_gcs['position'][2] = (
                     last_relaxed_ik_pose_wcs['position'][2]
                     - self.__chest_position
+                )
+
+            # Apply position clipping in GCS.
+            last_relaxed_ik_pose_gcs['position'][0] = np.clip(
+                last_relaxed_ik_pose_gcs['position'][0],
+                self.__INPUT_LIMITS['gcs']['position']['x'][0],
+                self.__INPUT_LIMITS['gcs']['position']['x'][1],
+            )
+            last_relaxed_ik_pose_gcs['position'][1] = np.clip(
+                last_relaxed_ik_pose_gcs['position'][1],
+                self.__INPUT_LIMITS['gcs']['position']['y'][0],
+                self.__INPUT_LIMITS['gcs']['position']['y'][1],
+            )
+            last_relaxed_ik_pose_gcs['position'][2] = np.clip(
+                last_relaxed_ik_pose_gcs['position'][2],
+                self.__INPUT_LIMITS['gcs']['position']['z'][0],
+                self.__INPUT_LIMITS['gcs']['position']['z'][1],
+            )
+
+            if self.__ENABLE_CHEST_COMPENSATION:
+                # Update WCS.
+                last_relaxed_ik_pose_wcs = copy.deepcopy(
+                    last_relaxed_ik_pose_gcs
+                )
+                last_relaxed_ik_pose_wcs['position'][2] = (
+                    last_relaxed_ik_pose_gcs['position'][2]
+                    + self.__chest_position
                 )
 
             self.__last_relaxed_ik_pose['gcs'] = last_relaxed_ik_pose_gcs

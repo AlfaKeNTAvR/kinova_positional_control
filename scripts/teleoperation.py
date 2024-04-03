@@ -44,7 +44,6 @@ class KinovaTeleoperation:
         convenience_compensation,
         maximum_input_position_change,
         maximum_input_orientation_change,
-        z_clip,
     ):
         """
         
@@ -62,12 +61,11 @@ class KinovaTeleoperation:
                     'position':
                         {
                             'x': [0.4, 0.55],
-                            'y': [-np.inf, np.inf],
+                            'y': [0.1, 0.85],
                             'z': [0.2 - 0.4, 0.2 + 0.4],
                         }
                 }
         }
-        self.__Z_CLIP = z_clip
 
         # # Public constants:
         self.ROBOT_NAME = robot_name
@@ -742,18 +740,17 @@ class KinovaTeleoperation:
             self.__INPUT_LIMITS['gcs']['position']['y'][1],
         )
 
-        if self.__Z_CLIP:
-            clipped_input_pose['position'][2] = np.clip(
-                compensated_input_pose['position'][2],
-                (
-                    self.__INPUT_LIMITS['gcs']['position']['z'][0]
-                    + self.__chest_position
-                ),
-                (
-                    self.__INPUT_LIMITS['gcs']['position']['z'][1]
-                    + self.__chest_position
-                ),
-            )
+        clipped_input_pose['position'][2] = np.clip(
+            compensated_input_pose['position'][2],
+            (
+                self.__INPUT_LIMITS['gcs']['position']['z'][0]
+                + self.__chest_position
+            ),
+            (
+                self.__INPUT_LIMITS['gcs']['position']['z'][1]
+                + self.__chest_position
+            ),
+        )
 
         # Protection against too big positional input changes. Controller loses
         # connection, goes out-of-sight, goes into a sleep mode, user input is
@@ -918,11 +915,6 @@ def main():
         )
     )
 
-    z_clip = rospy.get_param(
-        param_name=f'{rospy.get_name()}/z_clip',
-        default=True,
-    )
-
     kinova_teleoperation = KinovaTeleoperation(
         robot_name=kinova_name,
         tracking_mode=tracking_mode,
@@ -930,7 +922,6 @@ def main():
         convenience_compensation=convenience_compensation,
         maximum_input_position_change=maximum_input_position_change,
         maximum_input_orientation_change=maximum_input_orientation_change,
-        z_clip=z_clip,
     )
 
     rospy.on_shutdown(kinova_teleoperation.node_shutdown)
