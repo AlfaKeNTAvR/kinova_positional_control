@@ -325,7 +325,7 @@ class KinovaJointsControl:
             self.__start_absolute_positions = list(msg.position)
             self.__goal_absolute_positions = list(msg.position)
 
-            if not self.__is_initialized:
+            if not self.__dependency_status['kortex_driver']:
                 self.__dependency_status['kortex_driver'] = True
 
                 rospy.loginfo(
