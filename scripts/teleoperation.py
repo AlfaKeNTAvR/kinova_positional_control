@@ -224,7 +224,7 @@ class KinovaTeleoperation:
         if not self.__is_initialized:
             return success, message
 
-        if request.data and not self.__tracking_service_active:
+        if request.data:  # and not self.__tracking_service_active:
             self.__tracking_service_active = True
 
             rospy.logwarn(
@@ -242,9 +242,10 @@ class KinovaTeleoperation:
             message = 'pose_tracking was enabled.'
             success = True
 
-        elif not request.data and self.__tracking_service_active:
+        elif not request.data:  # and self.__tracking_service_active:
             self.__pose_tracking = False
             self.__tracking_service_active = False
+            self.__tracking_state_machine_state = 0
 
             rospy.logwarn(
                 (
