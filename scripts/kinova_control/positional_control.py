@@ -733,16 +733,18 @@ class KinovaPositionalControl:
         # GCS is used for initial homing to calculate WCS (WCS_Z = GCS_Z +
         # Chest_Z).
         if coordinate_system == 'gcs':
-
-            # Initialize GCS and WCS.
-            self.__last_relaxed_ik_pose['gcs'] = copy.deepcopy(target_pose)
-            self.__last_relaxed_ik_pose['wcs'] = copy.deepcopy(target_pose)
+            last_relaxed_ik_pose_gcs = copy.deepcopy(target_pose)
+            last_relaxed_ik_pose_wcs = copy.deepcopy(target_pose)
 
             if self.__ENABLE_CHEST_COMPENSATION:
-                self.__last_relaxed_ik_pose['wcs']['position'][2] = (
-                    self.__last_relaxed_ik_pose['wcs']['position'][2]
+                # Update WCS.
+                last_relaxed_ik_pose_wcs['position'][2] = (
+                    last_relaxed_ik_pose_gcs['position'][2]
                     + self.__chest_position
                 )
+
+            self.__last_relaxed_ik_pose['gcs'] = last_relaxed_ik_pose_gcs
+            self.__last_relaxed_ik_pose['wcs'] = last_relaxed_ik_pose_wcs
 
             # Convert into RIKCS.
             self.__last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
@@ -761,16 +763,18 @@ class KinovaPositionalControl:
 
         # WCS is used for all inputs except for the homing phase.
         elif coordinate_system == 'wcs':
-            # Initialize GCS and WCS.
-            self.__last_relaxed_ik_pose['gcs'] = copy.deepcopy(target_pose)
-            self.__last_relaxed_ik_pose['wcs'] = copy.deepcopy(target_pose)
+            last_relaxed_ik_pose_gcs = copy.deepcopy(target_pose)
+            last_relaxed_ik_pose_wcs = copy.deepcopy(target_pose)
 
             if self.__ENABLE_CHEST_COMPENSATION:
                 # Update GCS.
-                self.__last_relaxed_ik_pose['gcs']['position'][2] = (
-                    self.__last_relaxed_ik_pose['wcs']['position'][2]
+                last_relaxed_ik_pose_gcs['position'][2] = (
+                    last_relaxed_ik_pose_wcs['position'][2]
                     - self.__chest_position
                 )
+
+            self.__last_relaxed_ik_pose['gcs'] = last_relaxed_ik_pose_gcs
+            self.__last_relaxed_ik_pose['wcs'] = last_relaxed_ik_pose_wcs
 
             # Convert into RIKCS.
             self.__last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
