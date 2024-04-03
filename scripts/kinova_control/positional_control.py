@@ -17,7 +17,10 @@ import copy
 from ast import (literal_eval)
 from threading import (Timer)
 
-from std_msgs.msg import (Bool)
+from std_msgs.msg import (
+    Bool,
+    Float32,
+)
 from std_srvs.srv import (SetBool)
 from geometry_msgs.msg import (Pose)
 from sensor_msgs.msg import (JointState)
@@ -43,6 +46,9 @@ class KinovaPositionalControl:
         mounting_angles_deg,
         safe_homing_z,
         starting_pose,
+        enable_z_chest_compensation,
+        # ee_starting_position=(0.57, 0.0, 0.43),
+        # workspace_radius=1.2,
     ):
         """
         
@@ -52,6 +58,7 @@ class KinovaPositionalControl:
         self.__RELAXED_IK_STARTING_CONFIG = (
             np.array([0.0, 0.2619, 3.1415, -2.2690, 0.0, 0.9598, 1.5707])
         )
+        self.__ENABLE_Z_CHEST_COMPENSATION = enable_z_chest_compensation
 
         # # Public constants:
         self.ROBOT_NAME = robot_name
@@ -241,6 +248,12 @@ class KinovaPositionalControl:
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
 
+        # Chest compensation:
+        self.__chest_position = {
+            'current': None,
+            'previous': None,
+        }
+
         # # Public variables:
 
         # # Initialization and dependency status topics:
@@ -272,6 +285,17 @@ class KinovaPositionalControl:
                     self.__relaxed_ik_callback,
                 ),
         }
+
+        if self.__ENABLE_Z_CHEST_COMPENSATION:
+            self.__dependency_status['chest_control'] = False
+
+            self.__dependency_status_topics['chest_control'] = (
+                rospy.Subscriber(
+                    '/chest_control/is_initialized',
+                    Bool,
+                    self.__chest_control_callback,
+                )
+            )
 
         # # Service provider:
 
@@ -338,6 +362,12 @@ class KinovaPositionalControl:
             self.__joint_state_callback,
         )
 
+        rospy.Subscriber(
+            '/chest_logger/current_position',
+            Float32,
+            self.__chest_position_callback,
+        )
+
     # # Dependency status callbacks:
     def __joints_control_callback(self, msg):
         """
@@ -352,6 +382,13 @@ class KinovaPositionalControl:
         """
 
         self.__dependency_status['relaxed_ik'] = msg.data
+
+    def __chest_control_callback(self, msg):
+        """
+        
+        """
+
+        self.__dependency_status['chest_control'] = msg.data
 
     # # Service handlers:
 
@@ -414,6 +451,16 @@ class KinovaPositionalControl:
                     self.__kcs_rikcs_difference['orientation'],
                 )
             )
+
+    def __chest_position_callback(self, message):
+        """
+
+        """
+
+        self.__chest_position['current'] = message.data
+
+        if self.__chest_position['previous'] == None:
+            self.__chest_position['previous'] = message.data
 
     # # Private methods:
     def __check_initialization(self):
@@ -684,12 +731,35 @@ class KinovaPositionalControl:
         self.__last_relaxed_ik_pose['gcs'] = copy.deepcopy(target_pose)
         self.__last_relaxed_ik_pose['rikcs'] = copy.deepcopy(target_pose)
 
+        # Chest compensation:
+        if self.__ENABLE_Z_CHEST_COMPENSATION:
+            chest_position_delta = (
+                self.__chest_position['current']
+                - self.__chest_position['previous']
+            )
+
+            self.__last_relaxed_ik_pose['gcs']['position'][2] = (
+                target_pose['position'][2] - chest_position_delta
+            )
+
         if coordinate_system == 'gcs':
             # Update target pose in Relaxed IK CS.
-            self.__last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
-                self.ROTATE_GCS_TO_RIKCS[0:3, 0:3],
-                target_pose['position'],
-            )
+            if self.__ENABLE_Z_CHEST_COMPENSATION:
+                self.__last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
+                    self.ROTATE_GCS_TO_RIKCS[0:3, 0:3],
+                    [
+                        target_pose['position'][0],
+                        target_pose['position'][1],
+                        target_pose['position'][2] - chest_position_delta,
+                    ],
+                )
+
+            else:
+                self.__last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
+                    self.ROTATE_GCS_TO_RIKCS[0:3, 0:3],
+                    target_pose['position'],
+                )
+
             self.__last_relaxed_ik_pose['rikcs']['orientation'] = (
                 transformations.quaternion_multiply(
                     transformations.quaternion_from_matrix(
@@ -999,12 +1069,17 @@ def main():
             "{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}"
         )
     )
+    enable_z_chest_compensation = rospy.get_param(
+        param_name=f'{rospy.get_name()}/enable_z_chest_compensation',
+        default=False,
+    )
 
     pose_controller = KinovaPositionalControl(
         robot_name=kinova_name,
         mounting_angles_deg=mounting_angles_deg,
         safe_homing_z=safe_homing_z,
         starting_pose=starting_pose,
+        enable_z_chest_compensation=enable_z_chest_compensation,
     )
 
     rospy.on_shutdown(pose_controller.node_shutdown)
