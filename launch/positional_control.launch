@@ -6,7 +6,7 @@
     attempt to maintain in the main_loop. -->
     <arg 
     name="node_frequency" 
-    default="1000"/>
+    default="100"/>
 
     <arg 
     name="robot_name" 

@@ -4,6 +4,9 @@
 
     <arg name="robot_name" default="my_gen3"/>
     <arg name="logger_output" default="log"/>
+    <arg name="max_loop_frequency" default="100"/>
+    <arg name="min_loop_frequency" default="100"/>
+
 
     <!-- ======================== END OF SETTINGS ========================== -->
     
@@ -16,8 +19,8 @@
         <param name="Kp" value="3.5" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
-        <param name="max_loop_frequency" value="1000.0" />
-        <param name="min_loop_frequency" value="800.0" />
+        <param name="max_loop_frequency" value="$(arg max_loop_frequency)" />
+        <param name="min_loop_frequency" value="$(arg min_loop_frequency)" />
       </node>
 
       <!-- Joint 2 control: -->
@@ -25,8 +28,8 @@
         <param name="Kp" value="4.0" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
-        <param name="max_loop_frequency" value="1000.0" />
-        <param name="min_loop_frequency" value="800.0" />
+        <param name="max_loop_frequency" value="$(arg max_loop_frequency)" />
+        <param name="min_loop_frequency" value="$(arg min_loop_frequency)" />
       </node>
 
       <!-- Joint 3 control: -->
@@ -34,8 +37,8 @@
         <param name="Kp" value="3.5" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
-        <param name="max_loop_frequency" value="1000.0" />
-        <param name="min_loop_frequency" value="800.0" />
+        <param name="max_loop_frequency" value="$(arg max_loop_frequency)" />
+        <param name="min_loop_frequency" value="$(arg min_loop_frequency)" />
       </node>
 
       <!-- Joint 4 control: -->
@@ -43,8 +46,8 @@
         <param name="Kp" value="4.5" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
-        <param name="max_loop_frequency" value="1000.0" />
-        <param name="min_loop_frequency" value="800.0" />
+        <param name="max_loop_frequency" value="$(arg max_loop_frequency)" />
+        <param name="min_loop_frequency" value="$(arg min_loop_frequency)" />
       </node>
 
       <!-- Joint 5 control: -->
@@ -52,8 +55,8 @@
         <param name="Kp" value="3.5" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
-        <param name="max_loop_frequency" value="1000.0" />
-        <param name="min_loop_frequency" value="800.0" />
+        <param name="max_loop_frequency" value="$(arg max_loop_frequency)" />
+        <param name="min_loop_frequency" value="$(arg min_loop_frequency)" />
       </node>
 
       <!-- Joint 6 control: -->
@@ -61,8 +64,8 @@
         <param name="Kp" value="5.0" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
-        <param name="max_loop_frequency" value="1000.0" />
-        <param name="min_loop_frequency" value="800.0" />
+        <param name="max_loop_frequency" value="$(arg max_loop_frequency)" />
+        <param name="min_loop_frequency" value="$(arg min_loop_frequency)" />
       </node>
 
       <!-- Joint 7 control: -->
@@ -70,8 +73,8 @@
         <param name="Kp" value="4.5" />
         <param name="Ki" value="0.0" />
         <param name="Kd" value="0.0" />
-        <param name="max_loop_frequency" value="1000.0" />
-        <param name="min_loop_frequency" value="800.0" />
+        <param name="max_loop_frequency" value="$(arg max_loop_frequency)" />
+        <param name="min_loop_frequency" value="$(arg min_loop_frequency)" />
       </node>
     </group>
 </launch>
