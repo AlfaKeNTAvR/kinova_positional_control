@@ -7,6 +7,9 @@ Author (s):
     1. Nikita Boguslavskii (bognik3@gmail.com), Human-Inspired Robotics (HiRo)
        lab, Worcester Polytechnic Institute (WPI), 2023.
 
+TODO: 
+    1. Fix Z jump when enabling and disabling chest_z_compensation. 
+
 """
 
 import rospy
@@ -58,7 +61,6 @@ class KinovaPositionalControl:
         self.__RELAXED_IK_STARTING_CONFIG = (
             np.array([0.0, 0.2619, 3.1415, -2.2690, 0.0, 0.9598, 1.5707])
         )
-        self.__ENABLE_Z_CHEST_COMPENSATION = enable_z_chest_compensation
 
         # # Public constants:
         self.ROBOT_NAME = robot_name
@@ -253,6 +255,7 @@ class KinovaPositionalControl:
             'current': None,
             'previous': None,
         }
+        self.__enable_z_chest_compensation = enable_z_chest_compensation
 
         # # Public variables:
 
@@ -286,18 +289,21 @@ class KinovaPositionalControl:
                 ),
         }
 
-        if self.__ENABLE_Z_CHEST_COMPENSATION:
-            self.__dependency_status['chest_control'] = False
-
-            self.__dependency_status_topics['chest_control'] = (
-                rospy.Subscriber(
-                    '/chest_control/is_initialized',
-                    Bool,
-                    self.__chest_control_callback,
-                )
+        self.__dependency_status['chest_control'] = False
+        self.__dependency_status_topics['chest_control'] = (
+            rospy.Subscriber(
+                '/chest_control/is_initialized',
+                Bool,
+                self.__chest_control_callback,
             )
+        )
 
         # # Service provider:
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/positional_control/enable_z_chest_compensation',
+            SetBool,
+            self.__enable_z_chest_compensation_handler,
+        )
 
         # # Service subscriber:
         self.__pid_velocity_limit = rospy.ServiceProxy(
@@ -391,6 +397,35 @@ class KinovaPositionalControl:
         self.__dependency_status['chest_control'] = msg.data
 
     # # Service handlers:
+    def __enable_z_chest_compensation_handler(self, request):
+        """
+        
+        """
+
+        self.__enable_z_chest_compensation = request.data
+
+        if request.data:
+            self.__chest_position['previous'] = self.__chest_position['current']
+
+            rospy.logwarn(
+                (
+                    f'/{self.ROBOT_NAME}/positional_control: '
+                    'z_chest_compensation is now enabled.\n'
+                ),
+            )
+
+        else:
+            rospy.logwarn(
+                (
+                    f'/{self.ROBOT_NAME}/positional_control: '
+                    'z_chest_compensation is now disabled.\n'
+                ),
+            )
+
+        message = ''
+        success = True
+
+        return success, message
 
     # # Topic callbacks:
     def __input_pose_callback(self, msg):
@@ -459,9 +494,6 @@ class KinovaPositionalControl:
 
         self.__chest_position['current'] = message.data
 
-        if self.__chest_position['previous'] == None:
-            self.__chest_position['previous'] = message.data
-
     # # Private methods:
     def __check_initialization(self):
         """Monitors required criteria and sets is_initialized variable.
@@ -482,6 +514,12 @@ class KinovaPositionalControl:
         self.__dependency_initialized = True
 
         for key in self.__dependency_status:
+            if (
+                key == 'chest_control'
+                and not self.__enable_z_chest_compensation
+            ):
+                continue
+
             if self.__dependency_status_topics[key].get_num_connections() != 1:
                 if self.__dependency_status[key]:
                     rospy.logerr(
@@ -732,7 +770,7 @@ class KinovaPositionalControl:
         self.__last_relaxed_ik_pose['rikcs'] = copy.deepcopy(target_pose)
 
         # Chest compensation:
-        if self.__ENABLE_Z_CHEST_COMPENSATION:
+        if self.__enable_z_chest_compensation:
             chest_position_delta = (
                 self.__chest_position['current']
                 - self.__chest_position['previous']
@@ -744,7 +782,7 @@ class KinovaPositionalControl:
 
         if coordinate_system == 'gcs':
             # Update target pose in Relaxed IK CS.
-            if self.__ENABLE_Z_CHEST_COMPENSATION:
+            if self.__enable_z_chest_compensation:
                 self.__last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
                     self.ROTATE_GCS_TO_RIKCS[0:3, 0:3],
                     [
