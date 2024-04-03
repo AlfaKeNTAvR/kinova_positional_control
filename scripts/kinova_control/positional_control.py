@@ -31,7 +31,6 @@ from sensor_msgs.msg import (JointState)
 from kortex_driver.msg import (
     Twist,
     TwistCommand,
-    JointAngles,
 )
 from kortex_driver.srv import (Stop)
 from kinova_positional_control.srv import (PidVelocityLimit)
@@ -49,8 +48,7 @@ class KinovaPositionalControl:
         mounting_angles_deg,
         safe_homing_z,
         starting_pose,
-        # ee_starting_position=(0.57, 0.0, 0.43),
-        # workspace_radius=1.2,
+        enable_chest_compensation,
     ):
         """
         
@@ -60,6 +58,7 @@ class KinovaPositionalControl:
         self.__RELAXED_IK_STARTING_CONFIG = (
             np.array([0.0, 0.2619, 3.1415, -2.2690, 0.0, 0.9598, 1.5707])
         )
+        self.__ENABLE_CHEST_COMPENSATION = enable_chest_compensation
 
         # # Public constants:
         self.ROBOT_NAME = robot_name
@@ -121,6 +120,11 @@ class KinovaPositionalControl:
 
         # Input pose in Global and Relaxed IK coordinate systems.
         self.__input_pose = {
+            'wcs':
+                {
+                    'position': np.array([0.0, 0.0, 0.0]),
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+                },
             'gcs':
                 {
                     'position': np.array([0.0, 0.0, 0.0]),
@@ -130,6 +134,11 @@ class KinovaPositionalControl:
 
         # Last commanded Relaxed IK pose.
         self.__last_relaxed_ik_pose = {
+            'wcs':
+                {
+                    'position': np.array([0.0, 0.0, 0.0]),
+                    'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+                },
             'gcs':
                 {
                     'position': np.array([0.0, 0.0, 0.0]),
@@ -250,11 +259,7 @@ class KinovaPositionalControl:
         }
 
         # Chest compensation:
-        self.__chest_position = {
-            'current': None,
-            'previous': None,
-        }
-        self.__enable_z_chest_compensation = False
+        self.__chest_position = 0.0
 
         # # Public variables:
 
@@ -288,21 +293,17 @@ class KinovaPositionalControl:
                 ),
         }
 
-        self.__dependency_status['chest_control'] = False
-        self.__dependency_status_topics['chest_control'] = (
-            rospy.Subscriber(
-                '/chest_control/is_initialized',
-                Bool,
-                self.__chest_control_callback,
+        if self.__ENABLE_CHEST_COMPENSATION:
+            self.__dependency_status['chest_control'] = False
+            self.__dependency_status_topics['chest_control'] = (
+                rospy.Subscriber(
+                    '/chest_control/is_initialized',
+                    Bool,
+                    self.__chest_control_callback,
+                )
             )
-        )
 
         # # Service provider:
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/positional_control/enable_z_chest_compensation',
-            SetBool,
-            self.__enable_z_chest_compensation_handler,
-        )
 
         # # Service subscriber:
         self.__pid_velocity_limit = rospy.ServiceProxy(
@@ -327,6 +328,11 @@ class KinovaPositionalControl:
         )
         self.__relaxed_ik_commanded_gcs = rospy.Publisher(
             f'/{self.ROBOT_NAME}/relaxed_ik/commanded_pose_gcs',
+            Pose,
+            queue_size=1,
+        )
+        self.__commanded_pose_wcs = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/relaxed_ik/commanded_pose_wcs',
             Pose,
             queue_size=1,
         )
@@ -396,35 +402,6 @@ class KinovaPositionalControl:
         self.__dependency_status['chest_control'] = msg.data
 
     # # Service handlers:
-    def __enable_z_chest_compensation_handler(self, request):
-        """
-        
-        """
-
-        self.__enable_z_chest_compensation = request.data
-
-        if request.data:
-            self.__chest_position['previous'] = self.__chest_position['current']
-
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/positional_control: '
-                    'z_chest_compensation is now enabled.\n'
-                ),
-            )
-
-        else:
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/positional_control: '
-                    'z_chest_compensation is now disabled.\n'
-                ),
-            )
-
-        message = ''
-        success = True
-
-        return success, message
 
     # # Topic callbacks:
     def __input_pose_callback(self, msg):
@@ -432,14 +409,14 @@ class KinovaPositionalControl:
         
         """
 
-        self.__input_pose['gcs']['position'][0] = msg.position.x
-        self.__input_pose['gcs']['position'][1] = msg.position.y
-        self.__input_pose['gcs']['position'][2] = msg.position.z
+        self.__input_pose['wcs']['position'][0] = msg.position.x
+        self.__input_pose['wcs']['position'][1] = msg.position.y
+        self.__input_pose['wcs']['position'][2] = msg.position.z
 
-        self.__input_pose['gcs']['orientation'][0] = msg.orientation.w
-        self.__input_pose['gcs']['orientation'][1] = msg.orientation.x
-        self.__input_pose['gcs']['orientation'][2] = msg.orientation.y
-        self.__input_pose['gcs']['orientation'][3] = msg.orientation.z
+        self.__input_pose['wcs']['orientation'][0] = msg.orientation.w
+        self.__input_pose['wcs']['orientation'][1] = msg.orientation.x
+        self.__input_pose['wcs']['orientation'][2] = msg.orientation.y
+        self.__input_pose['wcs']['orientation'][3] = msg.orientation.z
 
     def __pid_motion_finished_callback(self, msg):
         """
@@ -491,7 +468,7 @@ class KinovaPositionalControl:
 
         """
 
-        self.__chest_position['current'] = message.data
+        self.__chest_position = message.data
 
     # # Private methods:
     def __check_initialization(self):
@@ -513,12 +490,6 @@ class KinovaPositionalControl:
         self.__dependency_initialized = True
 
         for key in self.__dependency_status:
-            if (
-                key == 'chest_control'
-                and not self.__enable_z_chest_compensation
-            ):
-                continue
-
             if self.__dependency_status_topics[key].get_num_connections() != 1:
                 if self.__dependency_status[key]:
                     rospy.logerr(
@@ -728,6 +699,11 @@ class KinovaPositionalControl:
 
         # Starting pose.
         self.__input_pose['gcs'] = copy.deepcopy(self.STARTING_POSE)
+        self.__input_pose['wcs'] = copy.deepcopy(self.STARTING_POSE)
+
+        if self.__ENABLE_CHEST_COMPENSATION:
+            self.__input_pose['wcs']['position'][2] += (self.__chest_position)
+
         self.__set_target_pose(self.__input_pose['gcs'], 'gcs')
         self.__wait_for_motion()
 
@@ -759,70 +735,60 @@ class KinovaPositionalControl:
                     'Dictionary values should be of type np.ndarray.'
                 )
 
-        # Check if coordinates are within the arm's workspace.
-        # TODO: Which coordinates system: GCS or RIKCS?
-        # target_pose['position'] = self.__check_boundaries(
-        #     target_pose['position']
-        # )
-
-        self.__last_relaxed_ik_pose['gcs'] = copy.deepcopy(target_pose)
-        self.__last_relaxed_ik_pose['rikcs'] = copy.deepcopy(target_pose)
-
-        # Chest compensation:
-        if self.__enable_z_chest_compensation:
-            chest_position_delta = (
-                self.__chest_position['current']
-                - self.__chest_position['previous']
-            )
-
-            self.__last_relaxed_ik_pose['gcs']['position'][2] = (
-                target_pose['position'][2] - chest_position_delta
-            )
-
+        # GCS is used for initial homing to calculate WCS (WCS_Z = GCS_Z +
+        # Chest_Z).
         if coordinate_system == 'gcs':
-            # Update target pose in Relaxed IK CS.
-            if self.__enable_z_chest_compensation:
-                self.__last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
-                    self.ROTATE_GCS_TO_RIKCS[0:3, 0:3],
-                    [
-                        target_pose['position'][0],
-                        target_pose['position'][1],
-                        target_pose['position'][2] - chest_position_delta,
-                    ],
+
+            # Initialize GCS and WCS.
+            self.__last_relaxed_ik_pose['gcs'] = copy.deepcopy(target_pose)
+            self.__last_relaxed_ik_pose['wcs'] = copy.deepcopy(target_pose)
+
+            if self.__ENABLE_CHEST_COMPENSATION:
+                self.__last_relaxed_ik_pose['wcs']['position'][2] = (
+                    self.__last_relaxed_ik_pose['wcs']['position'][2]
+                    + self.__chest_position
                 )
 
-            else:
-                self.__last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
-                    self.ROTATE_GCS_TO_RIKCS[0:3, 0:3],
-                    target_pose['position'],
-                )
+            # Convert into RIKCS.
+            self.__last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
+                self.ROTATE_GCS_TO_RIKCS[0:3, 0:3],
+                self.__last_relaxed_ik_pose['gcs']['position'],
+            )
 
             self.__last_relaxed_ik_pose['rikcs']['orientation'] = (
                 transformations.quaternion_multiply(
                     transformations.quaternion_from_matrix(
                         self.ROTATE_GCS_TO_RIKCS
                     ),
-                    target_pose['orientation'],
+                    self.__last_relaxed_ik_pose['gcs']['orientation'],
                 ),
             )[0]
 
-        # TODO: Test this segment.
-        elif coordinate_system == 'rikcs':
-            raise ValueError(
-                'Setting target orientation in RIKCS was not tested yet.'
+        # WCS is used for all inputs except for the homing phase.
+        elif coordinate_system == 'wcs':
+            # Initialize GCS and WCS.
+            self.__last_relaxed_ik_pose['gcs'] = copy.deepcopy(target_pose)
+            self.__last_relaxed_ik_pose['wcs'] = copy.deepcopy(target_pose)
+
+            if self.__ENABLE_CHEST_COMPENSATION:
+                # Update GCS.
+                self.__last_relaxed_ik_pose['gcs']['position'][2] = (
+                    self.__last_relaxed_ik_pose['wcs']['position'][2]
+                    - self.__chest_position
+                )
+
+            # Convert into RIKCS.
+            self.__last_relaxed_ik_pose['rikcs']['position'] = np.matmul(
+                self.ROTATE_GCS_TO_RIKCS[0:3, 0:3],
+                self.__last_relaxed_ik_pose['gcs']['position'],
             )
 
-            # Update target pose in Global IK CS.
-            self.__last_relaxed_ik_pose['gcs']['position'] = np.matmul(
-                self.ROTATE_RIKCS_TO_GCS[0:3, 0:3],
-                target_pose['position'],
-            )
-            self.__last_relaxed_ik_pose['gcs']['orientation'] = (
+            self.__last_relaxed_ik_pose['rikcs']['orientation'] = (
                 transformations.quaternion_multiply(
                     transformations.quaternion_from_matrix(
-                        self.ROTATE_RIKCS_TO_GCS
+                        self.ROTATE_GCS_TO_RIKCS
                     ),
-                    target_pose['orientation'],
+                    self.__last_relaxed_ik_pose['gcs']['orientation'],
                 ),
             )[0]
 
@@ -1034,11 +1000,14 @@ class KinovaPositionalControl:
         if not self.__is_initialized:
             return
 
-        self.__set_target_pose(self.__input_pose['gcs'], 'gcs')
+        self.__set_target_pose(self.__input_pose['wcs'], 'wcs')
 
         # Publish a commanded target position in Global CS.
         self.__relaxed_ik_commanded_gcs.publish(
             self.__compose_pose_message(self.__last_relaxed_ik_pose['gcs'])
+        )
+        self.__commanded_pose_wcs.publish(
+            self.__compose_pose_message(self.__last_relaxed_ik_pose['wcs'])
         )
         self.__kinova_forward_kinematics.publish(
             self.__compose_pose_message(self.__forward_kinematics_pose['kcs'])
@@ -1086,19 +1055,16 @@ def main():
         param_name=f'{rospy.get_name()}/robot_name',
         default='my_gen3',
     )
-
     mounting_angles_deg = literal_eval(
         rospy.get_param(
             param_name=f'{rospy.get_name()}/mounting_angles_deg',
             default='[0.0, 0.0, 0.0]',
         )
     )
-
     safe_homing_z = rospy.get_param(
         param_name=f'{rospy.get_name()}/safe_homing_z',
         default=0.0,
     )
-
     starting_pose = literal_eval(
         rospy.get_param(
             param_name=f'{rospy.get_name()}/starting_pose',
@@ -1106,12 +1072,17 @@ def main():
             "{'position': [0.0, 0.0, 0.0], 'orientation': [0.0, 0.0, 0.0]}"
         )
     )
+    enable_chest_compensation = rospy.get_param(
+        param_name=f'{rospy.get_name()}/enable_chest_compensation',
+        default=False,
+    )
 
     pose_controller = KinovaPositionalControl(
         robot_name=kinova_name,
         mounting_angles_deg=mounting_angles_deg,
         safe_homing_z=safe_homing_z,
         starting_pose=starting_pose,
+        enable_chest_compensation=enable_chest_compensation,
     )
 
     rospy.on_shutdown(pose_controller.node_shutdown)

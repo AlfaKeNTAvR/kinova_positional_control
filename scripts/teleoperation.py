@@ -88,8 +88,6 @@ class KinovaTeleoperation:
         self.__tracking_service_active = False
         self.__control_mode_service_active = False
 
-        self.__enable_z_chest_compensation = False
-
         # # Public variables:
         # Last commanded Relaxed IK pose is required to compensate controller
         # input.
@@ -105,12 +103,6 @@ class KinovaTeleoperation:
         self.input_relaxed_ik_difference = {
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
-        }
-
-        # Chest compensation:
-        self.__chest_position = {
-            'current': None,
-            'previous': None,
         }
 
         # # Initialization and dependency status topics:
@@ -143,15 +135,6 @@ class KinovaTeleoperation:
                 ),
         }
 
-        self.__dependency_status['chest_control'] = False
-        self.__dependency_status_topics['chest_control'] = (
-            rospy.Subscriber(
-                '/chest_control/is_initialized',
-                Bool,
-                self.__chest_control_callback,
-            )
-        )
-
         # # Service provider:
         rospy.Service(
             f'/{self.ROBOT_NAME}/teleoperation/enable_tracking',
@@ -163,11 +146,6 @@ class KinovaTeleoperation:
             SetBool,
             self.__enable_full_mode_handler,
         )
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/enable_z_chest_compensation',
-            SetBool,
-            self.__enable_z_chest_compensation_handler,
-        )
 
         # # Service subscriber:
         self.__gripper_force_grasping = rospy.ServiceProxy(
@@ -178,10 +156,6 @@ class KinovaTeleoperation:
             f'/{self.ROBOT_NAME}/gripper_control/position',
             GripperPosition,
         )
-        # self.__stop_arm = rospy.ServiceProxy(
-        #     f'/{self.ROBOT_NAME}/base/stop',
-        #     Stop,
-        # )
 
         # # Topic publisher:
         self.__node_is_initialized = rospy.Publisher(
@@ -218,15 +192,9 @@ class KinovaTeleoperation:
             self.__mode_button_callback,
         )
         rospy.Subscriber(
-            f'/{self.ROBOT_NAME}/relaxed_ik/commanded_pose_gcs',
+            f'/{self.ROBOT_NAME}/relaxed_ik/commanded_pose_wcs',
             Pose,
             self.__commanded_pose_callback,
-        )
-
-        rospy.Subscriber(
-            '/chest_logger/current_position',
-            Float32,
-            self.__chest_position_callback,
         )
 
     # # Dependency status callbacks:
@@ -243,13 +211,6 @@ class KinovaTeleoperation:
         """
 
         self.__dependency_status['gripper_control'] = message.data
-
-    def __chest_control_callback(self, msg):
-        """
-        
-        """
-
-        self.__dependency_status['chest_control'] = msg.data
 
     # # Service handlers:
     def __enable_tracking_handler(self, request):
@@ -344,36 +305,6 @@ class KinovaTeleoperation:
 
         return success, message
 
-    def __enable_z_chest_compensation_handler(self, request):
-        """
-        
-        """
-
-        self.__enable_z_chest_compensation = request.data
-
-        if request.data:
-            self.__chest_position['previous'] = self.__chest_position['current']
-
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    'z_chest_compensation is now enabled.\n'
-                ),
-            )
-
-        else:
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    'z_chest_compensation is now disabled.\n'
-                ),
-            )
-
-        message = ''
-        success = True
-
-        return success, message
-
     # # Topic callbacks:
     def __input_pose_callback(self, message):
         """
@@ -415,33 +346,14 @@ class KinovaTeleoperation:
         
         """
 
-        # Chest compensation:
-        if self.__enable_z_chest_compensation:
-            chest_position_delta = (
-                self.__chest_position['current']
-                - self.__chest_position['previous']
-            )
-
         self.last_relaxed_ik_pose['position'][0] = message.position.x
         self.last_relaxed_ik_pose['position'][1] = message.position.y
         self.last_relaxed_ik_pose['position'][2] = message.position.z
-
-        if self.__enable_z_chest_compensation:
-            self.last_relaxed_ik_pose['position'][2] = (
-                message.position.z + chest_position_delta
-            )
 
         self.last_relaxed_ik_pose['orientation'][0] = message.orientation.w
         self.last_relaxed_ik_pose['orientation'][1] = message.orientation.x
         self.last_relaxed_ik_pose['orientation'][2] = message.orientation.y
         self.last_relaxed_ik_pose['orientation'][3] = message.orientation.z
-
-    def __chest_position_callback(self, message):
-        """
-
-        """
-
-        self.__chest_position['current'] = message.data
 
     # # Private methods:
     def __check_initialization(self):
@@ -463,12 +375,6 @@ class KinovaTeleoperation:
         self.__dependency_initialized = True
 
         for key in self.__dependency_status:
-            if (
-                key == 'chest_control'
-                and not self.__enable_z_chest_compensation
-            ):
-                continue
-
             if self.__dependency_status_topics[key].get_num_connections() != 1:
                 if self.__dependency_status[key]:
                     rospy.logerr(

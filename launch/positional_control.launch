@@ -32,6 +32,13 @@
     name="starting_pose" 
     default="{'position': [0.5, 0.35, 0.33], 'orientation': [0.0, 0.0, 0.0]}"/>
 
+    <!-- Enable chest compensation (height stabilization): when set to "true"
+    the node will wait for the chest_control to home and will use WCS (GCS +
+    Chest) as an input. When set to "false" WCS = GCS. -->
+    <arg 
+    name="enable_chest_compensation" 
+    default="false"/>
+    
 
     <!-- If any of dependency or optional subfiles should not be launched (or
     are launched separately) set corresponding argument to "false". -->
@@ -108,6 +115,9 @@
             <param 
             name="starting_pose" 
             value="$(arg starting_pose)"/>
+            <param 
+            name="enable_chest_compensation" 
+            value="$(arg enable_chest_compensation)"/>
         </node>     
     </group>
 
