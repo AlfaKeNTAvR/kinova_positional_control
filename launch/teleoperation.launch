@@ -10,7 +10,7 @@
 
     <arg 
     name="robot_name" 
-    default="my_gen3"/>
+    default="ur5"/>
 
     <!-- Tracking mode: "hold" or "toggle". If "hold" mode controller tracking
     button should be constantly held, in "toggle" mode - press once to track

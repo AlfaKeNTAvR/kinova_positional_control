@@ -10,7 +10,7 @@
 
     <arg 
     name="robot_name" 
-    default="my_gen3"/>
+    default="ur5"/>
     <!-- Controller side: "right" or "left". -->
     <arg 
     name="controller_side" 

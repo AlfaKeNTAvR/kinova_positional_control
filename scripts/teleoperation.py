@@ -111,7 +111,7 @@ class KinovaTeleoperation:
 
         self.__dependency_status = {
             'positional_control': False,
-            'gripper_control': False,
+            # 'gripper_control': False,
         }
 
         self.__dependency_status_topics = {
@@ -121,12 +121,12 @@ class KinovaTeleoperation:
                     Bool,
                     self.__positional_control_callback,
                 ),
-            'gripper_control':
-                rospy.Subscriber(
-                    f'/{self.ROBOT_NAME}/gripper_control/is_initialized',
-                    Bool,
-                    self.__gripper_control_callback,
-                ),
+            # 'gripper_control':
+            #     rospy.Subscriber(
+            #         f'/{self.ROBOT_NAME}/gripper_control/is_initialized',
+            #         Bool,
+            #         self.__gripper_control_callback,
+            #     ),
         }
 
         # # Service provider:

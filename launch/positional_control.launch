@@ -10,19 +10,13 @@
 
     <arg 
     name="robot_name" 
-    default="my_gen3"/>
+    default="ur5"/>
 
     <!-- Mounting angles [degrees]: "[0.0, 0.0, 0.0]" - on the table. -->
     <arg 
     name="mounting_angles_deg" 
-    default="[180.0, 0.0, 0.0]"/> 
+    default="[0.0, 0.0, 0.0]"/> 
 
-    <!-- Move to this Z height [meters] in Kinova CS before moving to starting
-    position in Global CS. 0.0 value skips moving to safe Z height.
-    -->
-    <arg 
-    name="safe_homing_z" 
-    default="0.4"/>
 
     <!-- Starting (homing) pose in Global CS: position X, Y, Z [meters],
     orientation X, Y, Z [degrees]. Default Kinova homing pose (B button pose)
@@ -35,14 +29,11 @@
     <!-- If any of dependency or optional subfiles should not be launched (or
     are launched separately) set corresponding argument to "false". -->
     <arg 
-    name="launch_joints_control" 
-    default="true"/>
-    <arg 
     name="launch_relaxed_ik" 
     default="true"/>
     <arg 
     name="launch_gripper_control" 
-    default="true"/>
+    default="false"/>
 
     <!-- If set to "true" enable rosbag recording of nodes' outputs. -->
     <arg 
@@ -51,17 +42,6 @@
 
     <!-- ======================== END OF SETTINGS ========================== -->
     
-
-    <!-- Joints control (dependency): -->
-    <group if="$(arg launch_joints_control)">
-        <include 
-        file="$(find kinova_positional_control)/launch/joints_control.launch">
-            <arg 
-            name="robot_name" 
-            value="$(arg robot_name)"/>
-        </include>
-    </group>
-
     <group ns="/$(arg robot_name)">
         <!-- Relaxed IK (dependency): -->
         <group if="$(arg launch_relaxed_ik)">
@@ -101,9 +81,6 @@
             <param 
             name="mounting_angles_deg" 
             value="$(arg mounting_angles_deg)"/>
-            <param 
-            name="safe_homing_z" 
-            value="$(arg safe_homing_z)"/>
             <param 
             name="starting_pose" 
             value="$(arg starting_pose)"/>
