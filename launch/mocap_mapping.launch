@@ -1,0 +1,88 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- ============================ SETTINGS ============================= -->
+
+    <!-- Node frequency: the frequency [Hz] which rate.sleep() function will
+    attempt to maintain in the main_loop. -->
+    <arg
+    name="node_frequency"
+    default="80"/>
+
+    <arg
+    name="robot_name"
+    default="my_gen3"/>
+
+    <!-- If any of dependency or optional subfiles should not be launched (or
+    are launched separately) set corresponding argument to "false". -->
+    <arg
+    name="launch_teleoperation"
+    default="true"/>
+
+    <!-- If set to "true" enable rosbag recording of nodes' outputs. -->
+    <arg
+    name="enable_rosbag_recording"
+    default="false"/>
+
+    <!-- ======================== END OF SETTINGS ========================== -->
+
+    <!-- Teleoperation module (dependency): -->
+    <group if="$(arg launch_teleoperation)">
+        <include
+        file="$(find kinova_positional_control)/launch/teleoperation.launch">
+            <arg
+            name="robot_name"
+            value="$(arg robot_name)"/>
+        </include>
+    </group>
+
+    <!-- Mocap mapping: -->
+    <group ns="/$(arg robot_name)">
+        <node
+        pkg="kinova_positional_control"
+        type="mocap_mapping.py"
+        name="mocap_mapping"
+        output="screen">
+            <param
+            name="node_frequency"
+            value="$(arg node_frequency)"/>
+            <param
+            name="robot_name"
+            value="$(arg robot_name)"/>
+        </node>
+    </group>
+
+    <!-- Tracking and mode keymodule mapping: -->
+    <group ns="/$(arg robot_name)">
+        <node
+        pkg="kinova_positional_control"
+        type="keymodule_mapping.py"
+        name="keymodule_mapping"
+        output="screen">
+            <param
+            name="node_frequency"
+            value="$(arg node_frequency)"/>
+            <param
+            name="robot_name"
+            value="$(arg robot_name)"/>
+        </node>
+    </group>
+
+    <!-- Rosbag: -->
+    <group if="$(arg enable_rosbag_recording)">
+        <node
+        pkg="rosbag"
+        type="record"
+        name="rosbag"
+        ns="/$(arg robot_name)/oculus_mapping"
+        output="screen"
+        args="
+        /$(arg robot_name)/oculus_mapping/is_initialized
+        /$(arg robot_name)/teleoperation/input_pose
+        /$(arg robot_name)/teleoperation/tracking_button
+        /$(arg robot_name)/teleoperation/mode_button
+        /$(arg robot_name)/teleoperation/gripper_button
+        -o $(find kinova_positional_control)/bagfiles/mocap_mapping/$(arg robot_name)
+        ">
+        </node>
+    </group>
+</launch>
