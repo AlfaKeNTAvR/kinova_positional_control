@@ -23,6 +23,7 @@ from kortex_driver.msg import (
     Base_JointSpeeds,
     JointSpeed,
     JointAngles,
+    BaseCyclic_Feedback,
 )
 from kortex_driver.srv import (
     Stop,
@@ -69,6 +70,7 @@ class KinovaJointsControl:
         self.__goal_velocities = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
         self.__pid_enabled = True
+        self.__kinova_fault_state = True
 
         # # Public variables:
         self.velocity_fraction_limit = 1.0
@@ -212,10 +214,15 @@ class KinovaJointsControl:
         )
 
         # # Topic subscriber:
-        self.__kortex_feedback = rospy.Subscriber(
+        rospy.Subscriber(
             f'/{self.ROBOT_NAME}/base_feedback/joint_state',
             JointState,
             self.__absolute_feedback_callback,
+        )
+        rospy.Subscriber(
+            f'/{self.ROBOT_NAME}/base_feedback',
+            BaseCyclic_Feedback,
+            self.__base_feedback_callback,
         )
 
         rospy.Subscriber(
@@ -314,7 +321,7 @@ class KinovaJointsControl:
             self.__start_absolute_positions = list(msg.position)
             self.__goal_absolute_positions = list(msg.position)
 
-            if not self.__is_initialized:
+            if not self.__dependency_status['kortex_driver']:
                 self.__dependency_status['kortex_driver'] = True
 
                 rospy.loginfo(
@@ -327,6 +334,26 @@ class KinovaJointsControl:
             return
 
         self.__current_absolute_positions = msg.position
+
+    def __base_feedback_callback(self, msg: BaseCyclic_Feedback):
+        """
+        
+        """
+
+        if msg.base.fault_bank_a != 0:
+            self.__kinova_fault_state = True
+
+            rospy.logerr_throttle(
+                15,
+                (
+                    f'/{self.ROBOT_NAME}/joints_control: '
+                    'kortex_driver is in fault state!'
+                ),
+            )
+
+            return
+
+        self.__kinova_fault_state = False
 
     def __absolute_setpoint_callback(self, msg):
         """
@@ -433,7 +460,7 @@ class KinovaJointsControl:
             )
 
         # NOTE: Add more initialization criterea if needed.
-        if (self.__dependency_initialized):
+        if (self.__dependency_initialized and not self.__kinova_fault_state):
             if not self.__is_initialized:
                 rospy.loginfo(
                     f'\033[92m/{self.ROBOT_NAME}/joints_control: ready.\033[0m',

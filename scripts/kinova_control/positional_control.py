@@ -25,7 +25,7 @@ from sensor_msgs.msg import (JointState)
 from kortex_driver.msg import (
     Twist,
     TwistCommand,
-    JointAngles,
+    BaseCyclic_Feedback,
 )
 from kortex_driver.srv import (Stop)
 from kinova_positional_control.srv import (PidVelocityLimit)
@@ -241,6 +241,8 @@ class KinovaPositionalControl:
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
 
+        self.__kinova_fault_state = True
+
         # # Public variables:
 
         # # Initialization and dependency status topics:
@@ -338,6 +340,12 @@ class KinovaPositionalControl:
             self.__joint_state_callback,
         )
 
+        rospy.Subscriber(
+            f'/{self.ROBOT_NAME}/base_feedback',
+            BaseCyclic_Feedback,
+            self.__base_feedback_callback,
+        )
+
     # # Dependency status callbacks:
     def __joints_control_callback(self, msg):
         """
@@ -414,6 +422,16 @@ class KinovaPositionalControl:
                     self.__kcs_rikcs_difference['orientation'],
                 )
             )
+
+    def __base_feedback_callback(self, msg: BaseCyclic_Feedback):
+        """
+        
+        """
+
+        if msg.base.fault_bank_a != 0:
+            self.__kinova_fault_state = True
+
+        self.__kinova_fault_state = False
 
     # # Private methods:
     def __check_initialization(self):
