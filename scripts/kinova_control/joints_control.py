@@ -70,7 +70,11 @@ class KinovaJointsControl:
         self.__goal_velocities = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
         self.__pid_enabled = True
+        self.__pid_was_disabled = True
         self.__kinova_fault_state = True
+
+        self.__pid_enable_sm_state = 0
+        self.__motion_finished = True
 
         # # Public variables:
         self.velocity_fraction_limit = 1.0
@@ -297,6 +301,9 @@ class KinovaJointsControl:
         """
 
         self.__pid_enabled = request.data
+
+        if not request.data:
+            self.__pid_was_disabled = True
 
         rospy.logwarn(
             (
@@ -656,6 +663,34 @@ class KinovaJointsControl:
                 break
 
         self.__pid_motion_finished.publish(motion_finished)
+        self.__motion_finished = motion_finished
+
+    def __pid_enable_sm(self):
+        """Ensures smooth and slow repositioning after PID enabling.
+        
+        """
+
+        # State 0:
+        if (self.__pid_enable_sm_state == 0 and self.__pid_enabled):
+
+            if self.__pid_was_disabled:
+                self.velocity_fraction_limit = 0.1
+                self.__pid_enable_sm_state = 1
+
+        # State 1:
+        elif (self.__pid_enable_sm_state == 1):
+
+            if not self.__motion_finished:
+                self.__pid_enable_sm_state = 2
+
+        # State 2:
+        elif (self.__pid_enable_sm_state == 2):
+
+            if self.__motion_finished:
+                self.velocity_fraction_limit = 1.0
+                self.__pid_was_disabled = False
+
+                self.__pid_enable_sm_state = 0
 
     # # Public methods:
     def main_loop(self):
@@ -673,6 +708,8 @@ class KinovaJointsControl:
         self.__relative_setpoint()
 
         self.__publish_joint_motion_finished()
+
+        self.__pid_enable_sm()
 
         if self.__pid_enabled:
             self.__publish_goal_velocities()
