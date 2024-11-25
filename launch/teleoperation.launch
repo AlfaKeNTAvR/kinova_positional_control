@@ -50,7 +50,13 @@
     <!-- If any of dependency or optional subfiles should not be launched (or
     are launched separately) set corresponding argument to "false". -->
     <arg 
-    name="launch_positional_control" 
+    name="launch_joints_control" 
+    default="true"/>
+    <arg 
+    name="launch_relaxed_ik" 
+    default="true"/>
+    <arg 
+    name="launch_gripper_control" 
     default="true"/>
 
     <!-- If set to "true" enable rosbag recording of nodes' outputs. -->
@@ -59,16 +65,41 @@
     default="false"/>
 
     <!-- ======================== END OF SETTINGS ========================== -->
+  
+  
+    <group ns="/$(arg robot_name)">
+        <!-- Joints control (dependency): -->
+        <group if="$(arg launch_joints_control)">
+            <include 
+            file="$(find kinova_positional_control)/launch/joints_control.launch">
+                <arg 
+                name="robot_name" 
+                value="$(arg robot_name)"/>
+            </include>
+        </group>
 
-
-    <!-- Positional and gripper control (dependency): -->
-    <group if="$(arg launch_positional_control)">
-        <include 
-        file="$(find kinova_positional_control)/launch/positional_control.launch">
-            <arg 
-            name="robot_name" 
-            value="$(arg robot_name)"/>
-        </include>
+        <!-- Relaxed IK (dependency): -->
+        <group if="$(arg launch_relaxed_ik)">
+            <include 
+            file="$(find relaxed_ik_ros1)/launch/relaxed_ik.launch">
+                <arg 
+                name="robot_name" 
+                value="$(arg robot_name)"/>
+            </include>
+        </group>
+   
+        <!-- Gripper control (dependency): -->
+        <group if="$(arg launch_gripper_control)">
+            <node 
+            pkg="kinova_positional_control" 
+            type="gripper_control.py" 
+            name="gripper_control" 
+            output="screen">
+                <param 
+                name="robot_name" 
+                value="$(arg robot_name)"/>
+            </node>   
+        </group>
     </group>
 
     <!-- Teleoperation module: -->

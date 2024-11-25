@@ -16,6 +16,7 @@ import numpy as np
 import transformations
 from ast import (literal_eval)
 import tf2_ros
+import tf2_geometry_msgs  # Is required for tf2_ros.Buffer.transform().
 
 from std_msgs.msg import (Bool)
 from std_srvs.srv import (SetBool)
@@ -110,25 +111,33 @@ class KinovaTeleoperation:
             queue_size=1,
         )
 
-        self.__dependency_status = {
-            # 'positional_control': False,
-            # 'gripper_control': False,
-        }
+        self.__dependency_status = {}
+        self.__dependency_status_topics = {}
 
-        self.__dependency_status_topics = {
-            # 'positional_control':
-            #     rospy.Subscriber(
-            #         f'/{self.ROBOT_NAME}/positional_control/is_initialized',
-            #         Bool,
-            #         self.__positional_control_callback,
-            #     ),
-            # 'gripper_control':
-            #     rospy.Subscriber(
-            #         f'/{self.ROBOT_NAME}/gripper_control/is_initialized',
-            #         Bool,
-            #         self.__gripper_control_callback,
-            #     ),
-        }
+        self.__dependency_status['chest_control'] = False
+        self.__dependency_status_topics['chest_control'] = (
+            rospy.Subscriber(
+                f'/chest_control/is_initialized',
+                Bool,
+                self.__chest_control_callback,
+            )
+        )
+        self.__dependency_status['joints_control'] = False
+        self.__dependency_status_topics['joints_control'] = (
+            rospy.Subscriber(
+                f'/{self.ROBOT_NAME}/joints_control/is_initialized',
+                Bool,
+                self.__joints_control_callback,
+            )
+        )
+        self.__dependency_status['gripper_control'] = False
+        self.__dependency_status_topics['gripper_control'] = (
+            rospy.Subscriber(
+                f'/{self.ROBOT_NAME}/gripper_control/is_initialized',
+                Bool,
+                self.__gripper_control_callback,
+            )
+        )
 
         # # Service provider:
         rospy.Service(
@@ -151,10 +160,6 @@ class KinovaTeleoperation:
             f'/{self.ROBOT_NAME}/gripper_control/position',
             GripperPosition,
         )
-        # self.__stop_arm = rospy.ServiceProxy(
-        #     f'/{self.ROBOT_NAME}/base/stop',
-        #     Stop,
-        # )
 
         # # Topic publisher:
         self.__node_is_initialized = rospy.Publisher(
@@ -198,12 +203,19 @@ class KinovaTeleoperation:
         tf2_ros.TransformListener(self.__tf_buffer)
 
     # # Dependency status callbacks:
-    def __positional_control_callback(self, message):
-        """Monitors positional_control is_initialized topic.
+    def __chest_control_callback(self, message):
+        """Monitors chest_control is_initialized topic.
         
         """
 
-        self.__dependency_status['positional_control'] = message.data
+        self.__dependency_status['chest_control'] = message.data
+
+    def __joints_control_callback(self, message):
+        """Monitors joints_control is_initialized topic.
+        
+        """
+
+        self.__dependency_status['joints_control'] = message.data
 
     def __gripper_control_callback(self, message):
         """Monitors gripper_control is_initialized topic.
@@ -393,6 +405,9 @@ class KinovaTeleoperation:
                     # f'\nMake sure those dependencies are running properly!'
                 ),
             )
+
+        if self.__dependency_status['chest_control']:
+            self.__get_relaxed_ik_last_pose()
 
         # NOTE: Add more initialization criterea if needed.
         if (
@@ -750,6 +765,7 @@ class KinovaTeleoperation:
         # Convert target_pose (compensated pose) from base_link to
         # kinova/base_link:
         try:
+            # NOTE: Requires import tf2_geometry_msgs to work.
             pose_in_base_link = self.__tf_buffer.transform(
                 object_stamped=target_pose_stamped,
                 target_frame=f'{self.ROBOT_NAME}/base_link',
@@ -843,8 +859,6 @@ class KinovaTeleoperation:
         """
         
         """
-
-        self.__get_relaxed_ik_last_pose()
 
         self.__check_initialization()
 
