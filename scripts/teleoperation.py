@@ -15,16 +15,20 @@ import rospy
 import numpy as np
 import transformations
 from ast import (literal_eval)
+import tf2_ros
 
 from std_msgs.msg import (Bool)
 from std_srvs.srv import (SetBool)
-from geometry_msgs.msg import (Pose)
+from geometry_msgs.msg import (
+    Pose,
+    PoseStamped,
+)
 
-# from kortex_driver.srv import (Stop)
 from kinova_positional_control.srv import (
     GripperForceGrasping,
     GripperPosition,
 )
+from relaxed_ik_ros1.msg import (EEPoseGoals)
 
 
 class KinovaTeleoperation:
@@ -85,10 +89,7 @@ class KinovaTeleoperation:
         # # Public variables:
         # Last commanded Relaxed IK pose is required to compensate controller
         # input.
-        self.last_relaxed_ik_pose = {
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
-        }
+        self.last_relaxed_ik_pose = None
 
         # This difference is calculated each time the tracking is started and
         # subracted from future inputs during current tracking to compensate for
@@ -110,23 +111,23 @@ class KinovaTeleoperation:
         )
 
         self.__dependency_status = {
-            'positional_control': False,
-            'gripper_control': False,
+            # 'positional_control': False,
+            # 'gripper_control': False,
         }
 
         self.__dependency_status_topics = {
-            'positional_control':
-                rospy.Subscriber(
-                    f'/{self.ROBOT_NAME}/positional_control/is_initialized',
-                    Bool,
-                    self.__positional_control_callback,
-                ),
-            'gripper_control':
-                rospy.Subscriber(
-                    f'/{self.ROBOT_NAME}/gripper_control/is_initialized',
-                    Bool,
-                    self.__gripper_control_callback,
-                ),
+            # 'positional_control':
+            #     rospy.Subscriber(
+            #         f'/{self.ROBOT_NAME}/positional_control/is_initialized',
+            #         Bool,
+            #         self.__positional_control_callback,
+            #     ),
+            # 'gripper_control':
+            #     rospy.Subscriber(
+            #         f'/{self.ROBOT_NAME}/gripper_control/is_initialized',
+            #         Bool,
+            #         self.__gripper_control_callback,
+            #     ),
         }
 
         # # Service provider:
@@ -162,9 +163,9 @@ class KinovaTeleoperation:
             queue_size=1,
         )
 
-        self.__kinova_pose = rospy.Publisher(
-            f'/{self.ROBOT_NAME}/positional_control/input_pose',
-            Pose,
+        self.__relaxed_ik_target = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/relaxed_ik/ee_pose_goals',
+            EEPoseGoals,
             queue_size=1,
         )
 
@@ -189,11 +190,12 @@ class KinovaTeleoperation:
             Bool,
             self.__mode_button_callback,
         )
-        rospy.Subscriber(
-            f'/{self.ROBOT_NAME}/relaxed_ik/commanded_pose_gcs',
-            Pose,
-            self.__commanded_pose_callback,
-        )
+
+        # # TF broadcaster:
+
+        # # TF listener:
+        self.__tf_buffer = tf2_ros.Buffer(rospy.Duration(1))
+        tf2_ros.TransformListener(self.__tf_buffer)
 
     # # Dependency status callbacks:
     def __positional_control_callback(self, message):
@@ -339,20 +341,6 @@ class KinovaTeleoperation:
 
         self.__mode_button = message.data
 
-    def __commanded_pose_callback(self, message):
-        """
-        
-        """
-
-        self.last_relaxed_ik_pose['position'][0] = message.position.x
-        self.last_relaxed_ik_pose['position'][1] = message.position.y
-        self.last_relaxed_ik_pose['position'][2] = message.position.z
-
-        self.last_relaxed_ik_pose['orientation'][0] = message.orientation.w
-        self.last_relaxed_ik_pose['orientation'][1] = message.orientation.x
-        self.last_relaxed_ik_pose['orientation'][2] = message.orientation.y
-        self.last_relaxed_ik_pose['orientation'][3] = message.orientation.z
-
     # # Private methods:
     def __check_initialization(self):
         """Monitors required criteria and sets is_initialized variable.
@@ -407,7 +395,9 @@ class KinovaTeleoperation:
             )
 
         # NOTE: Add more initialization criterea if needed.
-        if (self.__dependency_initialized):
+        if (
+            self.__dependency_initialized and self.last_relaxed_ik_pose != None
+        ):
             if not self.__is_initialized:
                 rospy.loginfo(
                     f'\033[92m/{self.ROBOT_NAME}/teleoperation: ready.\033[0m',
@@ -729,23 +719,132 @@ class KinovaTeleoperation:
 
             return
 
-        pose_message = Pose()
-        pose_message.position.x = compensated_input_pose['position'][0]
-        pose_message.position.y = compensated_input_pose['position'][1]
-        pose_message.position.z = compensated_input_pose['position'][2]
+        # Prepare compensated_pose (target_pose) for convertion to
+        # kinova/base_link frame:
+        target_pose_stamped = PoseStamped()
+        target_pose_stamped.header.stamp = rospy.Time.now()
+        target_pose_stamped.header.frame_id = 'base_link'
+        target_pose_stamped.pose.position.x = (
+            compensated_input_pose['position'][0]
+        )
+        target_pose_stamped.pose.position.y = (
+            compensated_input_pose['position'][1]
+        )
+        target_pose_stamped.pose.position.z = (
+            compensated_input_pose['position'][2]
+        )
 
-        pose_message.orientation.w = compensated_input_pose['orientation'][0]
-        pose_message.orientation.x = compensated_input_pose['orientation'][1]
-        pose_message.orientation.y = compensated_input_pose['orientation'][2]
-        pose_message.orientation.z = compensated_input_pose['orientation'][3]
+        target_pose_stamped.pose.orientation.w = (
+            compensated_input_pose['orientation'][0]
+        )
+        target_pose_stamped.pose.orientation.x = (
+            compensated_input_pose['orientation'][1]
+        )
+        target_pose_stamped.pose.orientation.y = (
+            compensated_input_pose['orientation'][2]
+        )
+        target_pose_stamped.pose.orientation.z = (
+            compensated_input_pose['orientation'][3]
+        )
 
-        self.__kinova_pose.publish(pose_message)
+        # Convert target_pose (compensated pose) from base_link to
+        # kinova/base_link:
+        try:
+            pose_in_base_link = self.__tf_buffer.transform(
+                object_stamped=target_pose_stamped,
+                target_frame=f'{self.ROBOT_NAME}/base_link',
+            )
+
+            pose_message = Pose()
+            pose_message.position.x = pose_in_base_link.pose.position.x
+            pose_message.position.y = pose_in_base_link.pose.position.y
+            pose_message.position.z = pose_in_base_link.pose.position.z
+
+            pose_message.orientation.x = pose_in_base_link.pose.orientation.x
+            pose_message.orientation.y = pose_in_base_link.pose.orientation.y
+            pose_message.orientation.z = pose_in_base_link.pose.orientation.z
+            pose_message.orientation.w = pose_in_base_link.pose.orientation.w
+
+            ee_pose_goals = EEPoseGoals()
+            ee_pose_goals.ee_poses.append(pose_message)
+            ee_pose_goals.ee_poses.append(pose_message)
+
+            self.__relaxed_ik_target.publish(ee_pose_goals)
+
+        except Exception as ex:
+            rospy.logerr_throttle(
+                1, f'/{self.ROBOT_NAME}/teleoperation:'
+                f'\nError in __publish_kinova_pose: {ex}'
+            )
+
+    def __transform_lookup(
+        self,
+        buffer: tf2_ros.Buffer,
+        from_frame: str,
+        to_frame: str,
+    ):
+        """
+
+        """
+
+        try:
+            transform = buffer.lookup_transform(
+                target_frame=from_frame,
+                source_frame=to_frame,
+                time=rospy.Time(0),
+            )
+
+            return transform
+
+        except Exception as ex:
+            rospy.logerr_throttle(
+                1,
+                f'/{self.ROBOT_NAME}/teleoperation:'
+                f'\nError in __transform_lookup: {ex}',
+            )
+            return None
+
+    def __get_relaxed_ik_last_pose(self):
+        """
+        
+        """
+
+        # Get current relaxed_ik_target transform in base_link frame:
+        # Position:
+        transform = self.__transform_lookup(
+            self.__tf_buffer,
+            'base_link',
+            f'{self.ROBOT_NAME}/relaxed_ik_target',
+        )
+
+        if transform:
+            position = np.array(
+                [
+                    transform.transform.translation.x,
+                    transform.transform.translation.y,
+                    transform.transform.translation.z,
+                ]
+            )
+            orientation = np.array(
+                [
+                    transform.transform.rotation.w,
+                    transform.transform.rotation.x,
+                    transform.transform.rotation.y,
+                    transform.transform.rotation.z,
+                ]
+            )
+
+            self.last_relaxed_ik_pose = {}
+            self.last_relaxed_ik_pose['position'] = position
+            self.last_relaxed_ik_pose['orientation'] = orientation
 
     # # Public methods:
     def main_loop(self):
         """
         
         """
+
+        self.__get_relaxed_ik_last_pose()
 
         self.__check_initialization()
 
