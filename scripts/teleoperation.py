@@ -19,7 +19,10 @@ import tf2_ros
 import tf2_geometry_msgs  # Is required for tf2_ros.Buffer.transform().
 
 from std_msgs.msg import (Bool)
-from std_srvs.srv import (SetBool)
+from std_srvs.srv import (
+    SetBool,
+    Empty,
+)
 from geometry_msgs.msg import (
     Pose,
     PoseStamped,
@@ -30,6 +33,7 @@ from kinova_positional_control.srv import (
     GripperPosition,
 )
 from relaxed_ik_ros1.msg import (EEPoseGoals)
+from kortex_driver.srv import (Base_ClearFaults)
 
 
 class KinovaTeleoperation:
@@ -151,6 +155,22 @@ class KinovaTeleoperation:
             self.__enable_full_mode_handler,
         )
 
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/pause_relaxed_ik',
+            Empty,
+            self.__pause_relaxed_ik_handler,
+        )
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/resume_relaxed_ik',
+            Empty,
+            self.__resume_relaxed_ik_handler,
+        )
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/reset_relaxed_ik',
+            Empty,
+            self.__reset_relaxed_ik_handler,
+        )
+
         # # Service subscriber:
         self.__gripper_force_grasping = rospy.ServiceProxy(
             f'/{self.ROBOT_NAME}/gripper_control/force_grasping',
@@ -159,6 +179,18 @@ class KinovaTeleoperation:
         self.__gripper_position = rospy.ServiceProxy(
             f'/{self.ROBOT_NAME}/gripper_control/position',
             GripperPosition,
+        )
+        self.__enable_pid = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/joints_control/enable_pid',
+            SetBool,
+        )
+        self.__reset_rik = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/relaxed_ik/reset',
+            Empty,
+        )
+        self.__clear_arm_faults = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/base/clear_faults',
+            Base_ClearFaults,
         )
 
         # # Topic publisher:
@@ -316,6 +348,27 @@ class KinovaTeleoperation:
             success = True
 
         return success, message
+
+    def __pause_relaxed_ik_handler(self, request):
+        """
+
+        """
+
+        self.__pause_relaxed_ik()
+
+    def __resume_relaxed_ik_handler(self, request):
+        """
+
+        """
+
+        self.__resume_relaxed_ik()
+
+    def __reset_relaxed_ik_handler(self, request):
+        """
+
+        """
+
+        self.__reset_relaxed_ik()
 
     # # Topic callbacks:
     def __input_pose_callback(self, message):
@@ -853,6 +906,30 @@ class KinovaTeleoperation:
             self.last_relaxed_ik_pose = {}
             self.last_relaxed_ik_pose['position'] = position
             self.last_relaxed_ik_pose['orientation'] = orientation
+
+    def __pause_relaxed_ik(self):
+        """
+        
+        """
+
+        self.__enable_pid(False)
+
+    def __resume_relaxed_ik(self):
+        """
+        
+        """
+
+        self.__reset_rik()
+        self.__enable_pid(True)
+
+    def __reset_relaxed_ik(self):
+        """
+        
+        """
+
+        self.__pause_relaxed_ik()
+        self.__clear_arm_faults()
+        self.__resume_relaxed_ik()
 
     # # Public methods:
     def main_loop(self):
