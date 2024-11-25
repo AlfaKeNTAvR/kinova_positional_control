@@ -71,6 +71,7 @@ class KinovaJointsControl:
 
         self.__pid_enabled = True
         self.__pid_was_disabled = True
+        self.__pid_disabled_on_fault = False
         self.__kinova_fault_state = True
 
         self.__pid_enable_sm_state = 0
@@ -304,6 +305,10 @@ class KinovaJointsControl:
 
         if not request.data:
             self.__pid_was_disabled = True
+            self.__stop_arm_srv()
+
+        else:
+            self.__pid_disabled_on_fault = False
 
         rospy.logwarn(
             (
@@ -350,17 +355,31 @@ class KinovaJointsControl:
         if msg.base.fault_bank_a != 0:
             self.__kinova_fault_state = True
 
+            # Disable PID.
+            self.__pid_enabled = False
+            self.__pid_was_disabled = False
+            self.__pid_disabled_on_fault = True
+
             rospy.logerr_throttle(
                 15,
                 (
                     f'/{self.ROBOT_NAME}/joints_control: '
-                    'kortex_driver is in fault state!'
+                    'kortex_driver is in fault state! pid_enabled was set to False.'
                 ),
             )
 
             return
 
         self.__kinova_fault_state = False
+
+        if self.__pid_disabled_on_fault:
+            rospy.logwarn_throttle(
+                15,
+                (
+                    f'/{self.ROBOT_NAME}/joints_control: '
+                    'pid_enabled is still set to False after kortex_driver fault state...'
+                ),
+            )
 
     def __absolute_setpoint_callback(self, msg):
         """
