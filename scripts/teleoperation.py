@@ -78,6 +78,9 @@ class KinovaTeleoperation:
         self.__gripper_button = False
         self.__mode_button = False
 
+        self.__gripper_button_long_detected = False
+        self.__mode_button_long_detected = False
+
         self.__tracking_state_machine_state = 0
         self.__gripper_state_machine_state = 0
         self.__mode_state_machine_state = 0
@@ -228,6 +231,17 @@ class KinovaTeleoperation:
             self.__mode_button_callback,
         )
 
+        rospy.Subscriber(
+            f'/{self.ROBOT_NAME}/teleoperation/gripper_button_long',
+            Bool,
+            self.__gripper_button_long_callback,
+        )
+        rospy.Subscriber(
+            f'/{self.ROBOT_NAME}/teleoperation/mode_button_long',
+            Bool,
+            self.__mode_button_long_callback,
+        )
+
         # # TF broadcaster:
 
         # # TF listener:
@@ -356,6 +370,8 @@ class KinovaTeleoperation:
 
         self.__pause_relaxed_ik()
 
+        return []
+
     def __resume_relaxed_ik_handler(self, request):
         """
 
@@ -363,12 +379,16 @@ class KinovaTeleoperation:
 
         self.__resume_relaxed_ik()
 
+        return []
+
     def __reset_relaxed_ik_handler(self, request):
         """
 
         """
 
         self.__reset_relaxed_ik()
+
+        return []
 
     # # Topic callbacks:
     def __input_pose_callback(self, message):
@@ -405,6 +425,22 @@ class KinovaTeleoperation:
         """
 
         self.__mode_button = message.data
+
+    def __gripper_button_long_callback(self, message):
+        """
+
+        """
+
+        if message.data:
+            self.__gripper_button_long_detected = True
+
+    def __mode_button_long_callback(self, message):
+        """
+
+        """
+
+        if message.data:
+            self.__mode_button_long_detected = True
 
     # # Private methods:
     def __check_initialization(self):
@@ -486,7 +522,7 @@ class KinovaTeleoperation:
 
         self.__node_is_initialized.publish(self.__is_initialized)
 
-    def __tracking_state_machine(self, button):
+    def __tracking_state_machine(self):
         """
         
         """
@@ -497,7 +533,9 @@ class KinovaTeleoperation:
             return
 
         # State 0: Grip button was pressed.
-        if (self.__tracking_state_machine_state == 0 and button):
+        if (
+            self.__tracking_state_machine_state == 0 and self.__tracking_button
+        ):
 
             self.__tracking_state_machine_state = 1
 
@@ -506,7 +544,10 @@ class KinovaTeleoperation:
                 self.__pose_tracking = True
 
         # State 1: Grip button was released. Tracking is activated.
-        elif (self.__tracking_state_machine_state == 1 and not button):
+        elif (
+            self.__tracking_state_machine_state == 1
+            and not self.__tracking_button
+        ):
 
             if self.TRACKING_MODE == 'toggle':
                 self.__tracking_state_machine_state = 2
@@ -518,17 +559,22 @@ class KinovaTeleoperation:
                 self.__pose_tracking = False
 
         # State 2: Grip button was pressed. Tracking is deactivated.
-        elif (self.__tracking_state_machine_state == 2 and button):
+        elif (
+            self.__tracking_state_machine_state == 2 and self.__tracking_button
+        ):
 
             self.__tracking_state_machine_state = 3
             self.__pose_tracking = False
 
         # State 3: Grip button was released.
-        elif (self.__tracking_state_machine_state == 3 and not button):
+        elif (
+            self.__tracking_state_machine_state == 3
+            and not self.__tracking_button
+        ):
 
             self.__tracking_state_machine_state = 0
 
-    def __mode_state_machine(self, button):
+    def __mode_state_machine(self):
         """
         
         """
@@ -539,53 +585,77 @@ class KinovaTeleoperation:
             return
 
         # State 0: Button was pressed.
-        if (self.__mode_state_machine_state == 0 and button):
+        if (self.__mode_state_machine_state == 0 and self.__mode_button):
 
             self.__mode_state_machine_state = 1
+
+        # State 1: Button was released.
+        elif (self.__mode_state_machine_state == 1 and not self.__mode_button):
+            if self.__mode_button_long_detected:
+                self.__mode_state_machine_state = 0
+                self.__mode_button_long_detected = False
+                return
+
+            self.__mode_state_machine_state = 2
             self.__control_mode = 'full'
             self.__calculate_compensation()
 
-        # State 1: Button was released.
-        elif (self.__mode_state_machine_state == 1 and not button):
-
-            self.__mode_state_machine_state = 2
-
         # State 2: Button was pressed.
-        elif (self.__mode_state_machine_state == 2 and button):
+        elif (self.__mode_state_machine_state == 2 and self.__mode_button):
 
             self.__mode_state_machine_state = 3
-            self.__control_mode = 'position'
 
         # State 3: Button was released.
-        elif (self.__mode_state_machine_state == 3 and not button):
+        elif (self.__mode_state_machine_state == 3 and not self.__mode_button):
+            if self.__mode_button_long_detected:
+                self.__mode_state_machine_state = 2
+                self.__mode_button_long_detected = False
+                return
 
             self.__mode_state_machine_state = 0
+            self.__control_mode = 'position'
 
-    def __gripper_state_machine(self, button):
+    def __gripper_state_machine(self):
         """
         
         """
 
         # State 0: Button was pressed.
-        if (self.__gripper_state_machine_state == 0 and button):
+        if (self.__gripper_state_machine_state == 0 and self.__gripper_button):
 
-            self.__gripper_force_grasping(0.0)  # 0.0 for default current.
             self.__gripper_state_machine_state = 1
 
         # State 1: Button was released. Force grasping is activated.
-        elif (self.__gripper_state_machine_state == 1 and not button):
+        elif (
+            self.__gripper_state_machine_state == 1
+            and not self.__gripper_button
+        ):
+            if self.__gripper_button_long_detected:
+                self.__gripper_state_machine_state = 0
+                self.__gripper_button_long_detected = False
+                return
 
+            self.__gripper_force_grasping(0.0)  # 0.0 for default current.
             self.__gripper_state_machine_state = 2
 
         # State 2: Button was pressed. Open the gripper.
-        elif (self.__gripper_state_machine_state == 2 and button):
+        elif (
+            self.__gripper_state_machine_state == 2 and self.__gripper_button
+        ):
 
-            self.__gripper_position(0.0)  # 0.0 for open position.
             self.__gripper_state_machine_state = 3
 
         # State 3: Button was released.
-        elif (self.__gripper_state_machine_state == 3 and not button):
+        elif (
+            self.__gripper_state_machine_state == 3
+            and not self.__gripper_button
+        ):
+            if self.__gripper_button_long_detected:
+                self.__gripper_state_machine_state = 2
+                self.__gripper_button_long_detected = False
+                return
 
+            self.__gripper_position(0.0)  # 0.0 for open position.
             self.__gripper_state_machine_state = 0
 
     def __calculate_compensation(self):
@@ -942,9 +1012,9 @@ class KinovaTeleoperation:
         if not self.__is_initialized:
             return
 
-        self.__tracking_state_machine(self.__tracking_button)
-        self.__gripper_state_machine(self.__gripper_button)
-        self.__mode_state_machine(self.__mode_button)
+        self.__tracking_state_machine()
+        self.__gripper_state_machine()
+        self.__mode_state_machine()
 
         if self.__pose_tracking:
             self.__publish_kinova_pose()

@@ -8,13 +8,20 @@
     name="node_frequency" 
     default="80"/>
 
+    <!--  -->
     <arg 
     name="robot_name" 
     default="my_gen3"/>
+
     <!-- Controller side: "right" or "left". -->
     <arg 
     name="controller_side" 
     default="right"/>
+
+    <!-- Headset mode: "table" or "head". -->
+    <arg 
+    name="headset_mode" 
+    default="table"/>
 
     <!-- If any of dependency or optional subfiles should not be launched (or
     are launched separately) set corresponding argument to "false". -->
@@ -68,6 +75,9 @@
             <param 
             name="controller_side" 
             value="$(arg controller_side)"/>
+            <param 
+            name="headset_mode" 
+            value="$(arg headset_mode)"/>
         </node>
     </group> 
 

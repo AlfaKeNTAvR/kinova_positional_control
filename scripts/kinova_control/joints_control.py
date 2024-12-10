@@ -76,9 +76,10 @@ class KinovaJointsControl:
 
         self.__pid_enable_sm_state = 0
         self.__motion_finished = True
+        self.__pid_enable_start_time = None
 
         # # Public variables:
-        self.velocity_fraction_limit = 1.0
+        self.velocity_fraction_limit = 0.1
         self.motion_finished_threshold = 0.01
 
         # # Initialization and dependency status topics:
@@ -304,8 +305,11 @@ class KinovaJointsControl:
         self.__pid_enabled = request.data
 
         if not request.data:
+            self.velocity_fraction_limit = 0.1
             self.__pid_was_disabled = True
-            self.__stop_arm_srv()
+
+            if not self.__kinova_fault_state:
+                self.__stop_arm_srv()
 
         else:
             self.__pid_disabled_on_fault = False
@@ -357,7 +361,7 @@ class KinovaJointsControl:
 
             # Disable PID.
             self.__pid_enabled = False
-            self.__pid_was_disabled = False
+            self.__pid_was_disabled = True
             self.__pid_disabled_on_fault = True
 
             rospy.logerr_throttle(
@@ -689,27 +693,34 @@ class KinovaJointsControl:
         
         """
 
-        # State 0:
+        # State 0: Start the delay timer.
         if (self.__pid_enable_sm_state == 0 and self.__pid_enabled):
-
             if self.__pid_was_disabled:
-                self.velocity_fraction_limit = 0.1
                 self.__pid_enable_sm_state = 1
+                self.__pid_enable_start_time = rospy.Time.now()
 
-        # State 1:
+        # State 1: Delay.
         elif (self.__pid_enable_sm_state == 1):
-
-            if not self.__motion_finished:
+            # Delay.
+            if (
+                (rospy.Time.now() - self.__pid_enable_start_time).to_sec() >= 1
+            ):
                 self.__pid_enable_sm_state = 2
 
-        # State 2:
+        # State 2: Wait for the motion to finish.
         elif (self.__pid_enable_sm_state == 2):
-
             if self.__motion_finished:
                 self.velocity_fraction_limit = 1.0
                 self.__pid_was_disabled = False
 
                 self.__pid_enable_sm_state = 0
+
+        # rospy.loginfo_throttle(
+        #     0.5, (
+        #         f'{self.__pid_enable_sm_state=} '
+        #         f'{self.velocity_fraction_limit=} '
+        #     )
+        # )
 
     # # Public methods:
     def main_loop(self):

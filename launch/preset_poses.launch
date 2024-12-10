@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- ============================ SETTINGS ============================= -->
+
+    <!-- Node frequency: the frequency [Hz] which rate.sleep() function will
+    attempt to maintain in the main_loop. -->
+    <arg 
+    name="node_frequency" 
+    default="100"/>
+
+    <arg 
+    name="robot_name" 
+    default="my_gen3"/>
+
+    <!-- If any of dependency or optional subfiles should not be launched (or
+    are launched separately) set corresponding argument to "false". -->
+
+
+    <!-- If set to "true" enable rosbag recording of nodes' outputs. -->
+    <!-- <arg 
+    name="enable_rosbag_recording" 
+    default="false"/> -->
+
+    <!-- ======================== END OF SETTINGS ========================== -->
+  
+
+    <!-- Preset poses: -->
+    <group ns="/$(arg robot_name)">
+        <node 
+        pkg="kinova_positional_control" 
+        type="preset_poses.py" 
+        name="preset_poses" 
+        output="screen"
+        launch-prefix="bash -c 'sleep 0; $0 $@' ">
+            <param 
+            name="node_frequency" 
+            value="$(arg node_frequency)"/>
+            <param 
+            name="robot_name" 
+            value="$(arg robot_name)"/>
+        </node>   
+    </group>
+
+    <!-- Rosbag: -->
+</launch>

@@ -16,8 +16,13 @@ import numpy as np
 import transformations
 import copy
 
-from std_msgs.msg import (Bool)
+from std_msgs.msg import (
+    Bool,
+    Float64,
+)
 from geometry_msgs.msg import (Pose)
+
+from std_srvs.srv import (Empty)
 
 from oculus_ros.msg import (ControllerButtons)
 
@@ -29,9 +34,9 @@ class OculusMapping:
 
     def __init__(
         self,
-        robot_name='my_gen3',
-        controller_side='right',
-        headset_mode='table',
+        robot_name,
+        controller_side,
+        headset_mode,
     ):
         """
         
@@ -41,6 +46,9 @@ class OculusMapping:
             raise ValueError(
                 'controller_side should be either "right" or "left".'
             )
+
+        if headset_mode not in ['table', 'head']:
+            raise ValueError('headset_mode should be either "table" or "head".')
 
         # # Private constants:
 
@@ -55,6 +63,52 @@ class OculusMapping:
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
         self.__oculus_buttons = ControllerButtons()
+
+        self.__preset_pose_selection_mode = False
+        self.__preset_poses_state_machine_state = 0
+        self.__preset_pose_index = 0
+        self.__pressed_button = ''
+        self.__preset_poses = {
+            'none':
+                None,
+            'home':
+                rospy.ServiceProxy(
+                    f'/{self.ROBOT_NAME}/preset_poses/home_pose',
+                    Empty,
+                ),
+            'front_xy':
+                rospy.ServiceProxy(
+                    f'/{self.ROBOT_NAME}/preset_poses/front_xy_grasp_pose',
+                    Empty,
+                ),
+            'front_xz':
+                rospy.ServiceProxy(
+                    f'/{self.ROBOT_NAME}/preset_poses/front_xz_grasp_pose',
+                    Empty,
+                ),
+            'top_yz':
+                rospy.ServiceProxy(
+                    f'/{self.ROBOT_NAME}/preset_poses/top_yz_grasp_pose',
+                    Empty,
+                ),
+            'top_xz':
+                rospy.ServiceProxy(
+                    f'/{self.ROBOT_NAME}/preset_poses/top_xz_grasp_pose',
+                    Empty,
+                ),
+            'narrow':
+                rospy.ServiceProxy(
+                    f'/{self.ROBOT_NAME}/preset_poses/narrow_pose',
+                    Empty,
+                ),
+            'side':
+                rospy.ServiceProxy(
+                    f'/{self.ROBOT_NAME}/preset_poses/side_arm_pose',
+                    Empty,
+                ),
+        }
+        self.__trajectory_finished = False
+        self.__trajectory_fraction = 0.0
 
         # # Public variables:
         self.is_initialized = True
@@ -85,6 +139,18 @@ class OculusMapping:
         # # Service provider:
 
         # # Service subscriber:
+        self.__pause_relaxed_ik = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/teleoperation/pause_relaxed_ik',
+            Empty,
+        )
+        self.__resume_relaxed_ik = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/teleoperation/resume_relaxed_ik',
+            Empty,
+        )
+        self.__reset_relaxed_ik = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/teleoperation/reset_relaxed_ik',
+            Empty,
+        )
 
         # # Topic publisher:
         self.__node_is_initialized = rospy.Publisher(
@@ -114,6 +180,17 @@ class OculusMapping:
             queue_size=1,
         )
 
+        self.__teleoperation_gripper_button_long = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/teleoperation/gripper_button_long',
+            Bool,
+            queue_size=1,
+        )
+        self.__teleoperation_mode_button_long = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/teleoperation/mode_button_long',
+            Bool,
+            queue_size=1,
+        )
+
         # # Topic subscriber:
         rospy.Subscriber(
             f'/{self.CONTROLLER_SIDE}/controller_feedback/pose',
@@ -124,6 +201,17 @@ class OculusMapping:
             f'/{self.CONTROLLER_SIDE}/controller_feedback/buttons',
             ControllerButtons,
             self.__oculus_buttons_callback,
+        )
+
+        rospy.Subscriber(
+            f'/{self.ROBOT_NAME}/preset_poses/trajectory_finished',
+            Bool,
+            self.__trajectory_finished_callback,
+        )
+        rospy.Subscriber(
+            f'/{self.ROBOT_NAME}/preset_poses/trajectory_fraction',
+            Float64,
+            self.__trajectory_fraction_callback,
         )
 
     # # Dependency status callbacks:
@@ -157,6 +245,20 @@ class OculusMapping:
         """
 
         self.__oculus_buttons = message
+
+    def __trajectory_finished_callback(self, message):
+        """
+
+        """
+
+        self.__trajectory_finished = message.data
+
+    def __trajectory_fraction_callback(self, message):
+        """
+
+        """
+
+        self.__trajectory_fraction = message.data
 
     # # Private methods:
     def __check_initialization(self):
@@ -270,6 +372,131 @@ class OculusMapping:
 
         self.__teleoperation_pose.publish(pose_message)
 
+    def __preset_poses_state_machine(self):
+        """
+        
+        """
+
+        # State: Waiting for preset selection activation.
+        if (
+            self.__preset_poses_state_machine_state == 0
+            and self.__oculus_buttons.primary_button_long
+        ):
+            self.__preset_poses_state_machine_state = 1
+
+            rospy.loginfo(f'Entered preset pose selection mode.')
+
+        elif (
+            self.__preset_poses_state_machine_state == 1
+            and not self.__oculus_buttons.primary_button
+        ):
+            self.__preset_pose_selection_mode = True
+            self.__preset_pose_index = 0
+            self.__pressed_button = ''
+
+            rospy.loginfo(
+                f'Selected pose: '
+                f'{list(self.__preset_poses.keys())[self.__preset_pose_index]}'
+            )
+
+            self.__preset_poses_state_machine_state = 2
+
+        # State: Preset selection and confirmation.
+        elif (self.__preset_poses_state_machine_state == 2):
+            # Next preset (Press secondary button).
+            if self.__oculus_buttons.secondary_button:
+                self.__pressed_button = 'secondary_button'
+
+                self.__preset_poses_state_machine_state = 3
+
+            # Previous preset (Press primary button).
+            elif self.__oculus_buttons.primary_button:
+                self.__pressed_button = 'primary_button'
+
+                self.__preset_poses_state_machine_state = 3
+
+        # State: Button was released.
+        elif (self.__preset_poses_state_machine_state == 3):
+            if self.__oculus_buttons.primary_button_long:
+                rospy.loginfo(
+                    f'Confirmed pose: '
+                    f'{list(self.__preset_poses.keys())[self.__preset_pose_index]}'
+                )
+
+                self.__preset_poses_state_machine_state = 4
+
+            # Forward selection.
+            elif (
+                self.__pressed_button == 'primary_button'
+                and not self.__oculus_buttons.primary_button
+            ):
+                self.__preset_pose_index += 1
+
+                # Loop the selection.
+                if self.__preset_pose_index > len(self.__preset_poses) - 1:
+                    self.__preset_pose_index = 0
+
+                rospy.loginfo(
+                    f'Selected pose: '
+                    f'{list(self.__preset_poses.keys())[self.__preset_pose_index]}'
+                )
+
+                self.__pressed_button = ''
+                self.__preset_poses_state_machine_state = 2
+
+            # Backward selection.
+            elif (
+                self.__pressed_button == 'secondary_button'
+                and not self.__oculus_buttons.secondary_button
+            ):
+                self.__preset_pose_index -= 1
+
+                # Loop the selection.
+                if self.__preset_pose_index < 0:
+                    self.__preset_pose_index = len(self.__preset_poses) - 1
+
+                rospy.loginfo(
+                    f'Selected pose: '
+                    f'{list(self.__preset_poses.keys())[self.__preset_pose_index]}'
+                )
+
+                self.__pressed_button = ''
+                self.__preset_poses_state_machine_state = 2
+
+        # State: Long press button was released, motion has started.
+        elif (
+            self.__preset_poses_state_machine_state == 4
+            and not self.__oculus_buttons.primary_button
+        ):
+            self.__preset_poses_state_machine_state = 5
+
+            if self.__preset_pose_index == 0:
+                return
+
+            rospy.loginfo(f'Move to confirmed preset pose...')
+            self.__pause_relaxed_ik()
+
+            key = list(self.__preset_poses.keys())[self.__preset_pose_index]
+            self.__preset_poses[key]()
+
+        elif (
+            self.__preset_poses_state_machine_state == 5
+            and self.__trajectory_finished
+        ):
+            self.__preset_poses_state_machine_state = 0
+            self.__preset_pose_selection_mode = False
+
+            if self.__preset_pose_index == 0:
+                return
+
+            self.__reset_relaxed_ik()
+
+            if self.__trajectory_fraction == 1.0:
+                rospy.loginfo(f'Motion has finished.')
+
+            else:
+                rospy.logwarn(f'Motion planning has failed.')
+
     # # Public methods:
     def main_loop(self):
         """
@@ -281,6 +508,11 @@ class OculusMapping:
         if not self.__is_initialized:
             return
 
+        self.__preset_poses_state_machine()
+
+        if self.__preset_pose_selection_mode:
+            return
+
         self.__publish_teleoperation_pose()
         self.__teleoperation_tracking_button.publish(
             self.__oculus_buttons.grip_button
@@ -290,6 +522,13 @@ class OculusMapping:
         )
         self.__teleoperation_mode_button.publish(
             self.__oculus_buttons.primary_button
+        )
+
+        self.__teleoperation_gripper_button_long.publish(
+            self.__oculus_buttons.trigger_button_long
+        )
+        self.__teleoperation_mode_button_long.publish(
+            self.__oculus_buttons.primary_button_long
         )
 
     def node_shutdown(self):
@@ -334,10 +573,15 @@ def main():
         default='right',
     )
 
+    headset_mode = rospy.get_param(
+        param_name=f'{rospy.get_name()}/headset_mode',
+        default='table',
+    )
+
     oculus_kinova_mapping = OculusMapping(
         robot_name=kinova_name,
         controller_side=controller_side,
-        headset_mode='table',
+        headset_mode=headset_mode,
     )
 
     rospy.on_shutdown(oculus_kinova_mapping.node_shutdown)
