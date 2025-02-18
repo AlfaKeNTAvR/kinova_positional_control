@@ -497,6 +497,34 @@ class OculusMapping:
             else:
                 rospy.logwarn(f'Motion planning has failed.')
 
+    def __reset_relaxed_ik_state_machine(self):
+        """Resets relaxed IK and clears Kinova faults.
+        
+        """
+
+        # State 0: Long press secondary button.
+        if (
+            self.__reset_state_machine_state == 0
+            and self.__oculus_buttons.secondary_button_long
+        ):
+            self.__reset_state_machine_state = 1
+
+            try:
+                self.__reset_relaxed_ik()
+
+            except Exception as ex:
+                rospy.logerr(
+                    f'/{self.ROBOT_NAME}/oculus_mapping: '
+                    f'\nError calling self.__reset_relaxed_ik(): {ex}'
+                )
+
+        # State 1: Release secondary button.
+        elif (
+            self.__reset_state_machine_state == 1
+            and not self.__oculus_buttons.secondary_button_long
+        ):
+            self.__reset_state_machine_state = 0
+
     # # Public methods:
     def main_loop(self):
         """
@@ -506,6 +534,7 @@ class OculusMapping:
         self.__check_initialization()
 
         if not self.__is_initialized:
+            self.__reset_relaxed_ik_state_machine()
             return
 
         self.__preset_poses_state_machine()
