@@ -387,7 +387,7 @@ class KinovaGripperControl:
                 elif self.__force_grasping_stage == 'verification':
                     self.__force_grasping_stage = 'grasping'
 
-                    if self.__gripper_position_feedback < 0.99:
+                    if self.__gripper_position_feedback < 0.97:
                         self.__force_grasping_status = 'grasped'
 
                     else:
@@ -452,6 +452,11 @@ def main():
     rospy.loginfo('\n\n\n\n\n')  # Add whitespaces to separate logs.
 
     # # ROS parameters:
+    node_frequency = rospy.get_param(
+        param_name=f'{rospy.get_name()}/node_frequency',
+        default=100,
+    )
+
     kinova_name = rospy.get_param(
         param_name=f'{rospy.get_name()}/robot_name',
         default='my_gen3',
@@ -460,9 +465,11 @@ def main():
     gripper_control = KinovaGripperControl(robot_name=kinova_name)
 
     rospy.on_shutdown(gripper_control.node_shutdown)
+    node_rate = rospy.Rate(node_frequency)
 
     while not rospy.is_shutdown():
         gripper_control.main_loop()
+        node_rate.sleep()
 
 
 if __name__ == '__main__':

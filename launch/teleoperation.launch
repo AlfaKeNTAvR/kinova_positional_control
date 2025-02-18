@@ -90,15 +90,12 @@
    
         <!-- Gripper control (dependency): -->
         <group if="$(arg launch_gripper_control)">
-            <node 
-            pkg="kinova_positional_control" 
-            type="gripper_control.py" 
-            name="gripper_control" 
-            output="screen">
-                <param 
+            <include 
+            file="$(find kinova_positional_control)/launch/gripper_control.launch">
+                <arg 
                 name="robot_name" 
                 value="$(arg robot_name)"/>
-            </node>   
+            </include>
         </group>
     </group>
 
