@@ -685,11 +685,21 @@ class PresetPoses:
 
                     self.__trajectory_execution_finished = False
                     self.__trajectory_execution_finished = (
-                        self.__arm_group.execute(plan, wait=True)
+                        self.__arm_group.execute(
+                            plan,
+                            wait=True,
+                        )
                     )
 
                     if best_fraction == 1.0:
                         target_reached = True
+
+                    if not self.__trajectory_execution_finished:
+                        rospy.logerr(
+                            f'/{self.__ROBOT_NAME}/preset_poses: '
+                            f'\nTrajectory execution failed!'
+                        )
+                        self.__trajectory_execution_finished = True
 
                 else:
                     rospy.logerr(
