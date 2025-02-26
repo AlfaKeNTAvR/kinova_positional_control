@@ -138,6 +138,16 @@ class PresetPoses:
             Empty,
             self.__top_yz_grasp_pose_handler,
         )
+        rospy.Service(
+            f'/{self.__ROBOT_NAME}/preset_poses/side_yx_grasp_pose',
+            Empty,
+            self.__side_yx_grasp_pose_handler,
+        )
+        rospy.Service(
+            f'/{self.__ROBOT_NAME}/preset_poses/side_yz_grasp_pose',
+            Empty,
+            self.__side_yz_grasp_pose_handler,
+        )
 
         # # Service subscriber:
 
@@ -421,6 +431,92 @@ class PresetPoses:
 
         # Update the orientation:
         rpy_deg = np.deg2rad(np.array([-180, 0, 90]))
+        quaternion = tf.quaternion_from_euler(
+            rpy_deg[0],
+            rpy_deg[1],
+            rpy_deg[2],
+        )
+
+        target_pose.orientation.x = quaternion[0]
+        target_pose.orientation.y = quaternion[1]
+        target_pose.orientation.z = quaternion[2]
+        target_pose.orientation.w = quaternion[3]
+
+        self.__set_target_pose(
+            target_pose=target_pose,
+            target_frame='base_link',
+        )
+
+        return []
+
+    def __side_yx_grasp_pose_handler(self, request):
+        """
+        
+        """
+
+        # Current pose in kinova/base_link.
+        current_pose = self.__arm_group.get_current_pose().pose
+
+        # Current pose in base_link.
+        current_pose = self.__convert_pose(
+            pose=current_pose,
+            from_frame=f'{self.__ROBOT_NAME}/base_link',
+            to_frame='base_link',
+        )
+
+        target_pose = Pose()
+
+        # Keep the same position.
+        target_pose.position = current_pose.position
+
+        # Update the orientation:
+        rpy_deg = np.deg2rad(np.array([90, 0, 180]))
+        if self.__ROBOT_NAME == 'left_arm':
+            rpy_deg = np.deg2rad(np.array([90, 0, 0]))
+
+        quaternion = tf.quaternion_from_euler(
+            rpy_deg[0],
+            rpy_deg[1],
+            rpy_deg[2],
+        )
+
+        target_pose.orientation.x = quaternion[0]
+        target_pose.orientation.y = quaternion[1]
+        target_pose.orientation.z = quaternion[2]
+        target_pose.orientation.w = quaternion[3]
+
+        self.__set_target_pose(
+            target_pose=target_pose,
+            target_frame='base_link',
+        )
+
+        return []
+
+    def __side_yz_grasp_pose_handler(self, request):
+        """
+        
+        """
+
+        # Current pose in kinova/base_link.
+        current_pose = self.__arm_group.get_current_pose().pose
+
+        # Current pose in base_link.
+        current_pose = self.__convert_pose(
+            pose=current_pose,
+            from_frame=f'{self.__ROBOT_NAME}/base_link',
+            to_frame='base_link',
+        )
+
+        target_pose = Pose()
+
+        # Keep the same position.
+        target_pose.position = current_pose.position
+
+        # Update the orientation:
+        rpy_deg = np.deg2rad(np.array([90, -90, 180]))
+        if self.__ROBOT_NAME == 'left_arm':
+            rpy_deg = np.deg2rad(np.array([180, 90, 90]))
+
         quaternion = tf.quaternion_from_euler(
             rpy_deg[0],
             rpy_deg[1],

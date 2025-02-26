@@ -96,6 +96,16 @@ class OculusMapping:
                     f'/{self.ROBOT_NAME}/preset_poses/top_xz_grasp_pose',
                     Empty,
                 ),
+            'side_yx':
+                rospy.ServiceProxy(
+                    f'/{self.ROBOT_NAME}/preset_poses/side_yx_grasp_pose',
+                    Empty,
+                ),
+            'side_yz':
+                rospy.ServiceProxy(
+                    f'/{self.ROBOT_NAME}/preset_poses/side_yz_grasp_pose',
+                    Empty,
+                ),
             'narrow':
                 rospy.ServiceProxy(
                     f'/{self.ROBOT_NAME}/preset_poses/narrow_pose',
@@ -188,6 +198,17 @@ class OculusMapping:
         self.__teleoperation_mode_button_long = rospy.Publisher(
             f'/{self.ROBOT_NAME}/teleoperation/mode_button_long',
             Bool,
+            queue_size=1,
+        )
+
+        self.__preset_pose_mode = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/oculus_mapping/preset_pose_mode',
+            Bool,
+            queue_size=1,
+        )
+        self.__preset_pose = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/oculus_mapping/preset_pose',
+            String,
             queue_size=1,
         )
 
