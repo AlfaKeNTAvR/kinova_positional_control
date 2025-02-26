@@ -18,7 +18,10 @@ from ast import (literal_eval)
 import tf2_ros
 import tf2_geometry_msgs  # Is required for tf2_ros.Buffer.transform().
 
-from std_msgs.msg import (Bool)
+from std_msgs.msg import (
+    Bool,
+    Float64,
+)
 from std_srvs.srv import (
     SetBool,
     Empty,
@@ -108,6 +111,10 @@ class KinovaTeleoperation:
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
 
+        self.__open_gripper_position = 0.0
+        self.__close_gripper_position = 1.0
+        self.__gripper_mode = 'force'  # 'position' or 'force'
+
         # # Initialization and dependency status topics:
         self.__is_initialized = False
         self.__dependency_initialized = False
@@ -172,6 +179,22 @@ class KinovaTeleoperation:
             f'/{self.ROBOT_NAME}/teleoperation/reset_relaxed_ik',
             Empty,
             self.__reset_relaxed_ik_handler,
+        )
+
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/gripper/set_open_position',
+            GripperPosition,
+            self.__set_open_position_handler,
+        )
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/gripper/set_close_position',
+            GripperPosition,
+            self.__set_close_position_handler,
+        )
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/gripper/enable_position_mode',
+            SetBool,
+            self.__enable_position_mode_handler,
         )
 
         # # Service subscriber:
@@ -389,6 +412,48 @@ class KinovaTeleoperation:
         self.__reset_relaxed_ik()
 
         return []
+
+    def __set_open_position_handler(self, request: GripperPosition):
+        """Sets open gripper position variable.
+
+        """
+
+        self.__open_gripper_position = np.clip(
+            request.position,
+            0.0,
+            1.0,
+        )
+
+        return True
+
+    def __set_close_position_handler(self, request: GripperPosition):
+        """Sets close gripper position variable.
+
+        """
+
+        self.__close_gripper_position = np.clip(
+            request.position,
+            0.0,
+            1.0,
+        )
+
+        return True
+
+    def __enable_position_mode_handler(self, request: SetBool):
+        """Enables position mode.
+
+        """
+        if request.data:
+            self.__gripper_mode = 'position'
+            message = 'Gripper POSITION mode.'
+
+        else:
+            self.__gripper_mode = 'force'
+            message = 'Gripper FORCE mode.'
+
+        success = True
+
+        return success, message
 
     # # Topic callbacks:
     def __input_pose_callback(self, message):
@@ -635,7 +700,13 @@ class KinovaTeleoperation:
                 self.__gripper_button_long_detected = False
                 return
 
-            self.__gripper_force_grasping(0.0)  # 0.0 for default current.
+            if self.__gripper_mode == 'force':
+                self.__gripper_force_grasping(0.0)  # 0.0 for default current.
+            else:
+                self.__gripper_position(
+                    self.__close_gripper_position
+                )  # 1.0 for close position.
+
             self.__gripper_state_machine_state = 2
 
         # State 2: Button was pressed. Open the gripper.
@@ -655,7 +726,9 @@ class KinovaTeleoperation:
                 self.__gripper_button_long_detected = False
                 return
 
-            self.__gripper_position(0.0)  # 0.0 for open position.
+            self.__gripper_position(
+                self.__open_gripper_position
+            )  # 0.0 for open position.
             self.__gripper_state_machine_state = 0
 
     def __calculate_compensation(self):
