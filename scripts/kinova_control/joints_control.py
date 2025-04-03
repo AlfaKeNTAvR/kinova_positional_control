@@ -706,14 +706,21 @@ class KinovaJointsControl:
                 (rospy.Time.now() - self.__pid_enable_start_time).to_sec() >= 1
             ):
                 self.__pid_enable_sm_state = 2
+                self.__repositioning_start = rospy.Time.now()
 
         # State 2: Wait for the motion to finish.
         elif (self.__pid_enable_sm_state == 2):
-            if self.__motion_finished:
+            if self.__motion_finished or (
+                rospy.Time.now() - self.__repositioning_start
+            ).to_sec() >= 5:
                 self.velocity_fraction_limit = 1.0
                 self.__pid_was_disabled = False
 
                 self.__pid_enable_sm_state = 0
+
+                # rospy.logwarn(
+                #     f'\nAlligned in: {(rospy.Time.now() - self.__repositioning_start).to_sec()} (s).'
+                # )
 
         # rospy.loginfo_throttle(
         #     0.5, (
