@@ -146,6 +146,11 @@ class KinovaJointsControl:
             Bool,
             queue_size=1,
         )
+        self.__pid_motion_enabled = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/joints_control/pid_enabled',
+            Bool,
+            queue_size=1,
+        )
 
         self.__state_1 = rospy.Publisher(
             f'/{self.ROBOT_NAME}/joint_1/state',
@@ -745,6 +750,7 @@ class KinovaJointsControl:
         self.__relative_setpoint()
 
         self.__publish_joint_motion_finished()
+        self.__pid_motion_enabled.publish(self.__pid_enabled)
 
         self.__pid_enable_sm()
 
