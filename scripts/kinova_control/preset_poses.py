@@ -728,6 +728,9 @@ class PresetPoses:
             target_reached = False
             number_attempts = 5
 
+            self.__trajectory_execution_finished = False
+            total_trajectory_fraction = 0.0
+
             for attempt_ix in range(number_attempts):
                 if target_reached:
                     break
@@ -766,10 +769,10 @@ class PresetPoses:
                     f'\nBest eef_step: {round(best_eef_step, 3)}'
                 )
 
-                self.__trajectory_plan_fraction = best_fraction
-
                 if best_fraction > 0.0:
-                    # Retime the trajectory to account for velocity and accleration
+                    total_trajectory_fraction += best_fraction
+
+                    # Retime the trajectory to account for velocity and acceleration
                     # scales:
                     plan = self.__arm_group.retime_trajectory(
                         self.__robot.get_current_state(),
@@ -779,8 +782,8 @@ class PresetPoses:
                         # algorithm='time_optimal_trajectory_generation',
                     )
 
-                    self.__trajectory_execution_finished = False
-                    self.__trajectory_execution_finished = (
+                    trajectory_execution_finished = False
+                    trajectory_execution_finished = (
                         self.__arm_group.execute(
                             plan,
                             wait=True,
@@ -790,12 +793,11 @@ class PresetPoses:
                     if best_fraction == 1.0:
                         target_reached = True
 
-                    if not self.__trajectory_execution_finished:
+                    if not trajectory_execution_finished:
                         rospy.logerr(
                             f'/{self.__ROBOT_NAME}/preset_poses: '
                             f'\nTrajectory execution failed!'
                         )
-                        self.__trajectory_execution_finished = True
 
                 else:
                     rospy.logerr(
@@ -803,6 +805,9 @@ class PresetPoses:
                         f'\nPlan fraction: {round(fraction, 3)}'
                         f'\neef_step: {round(eef_step, 3)}'
                     )
+
+            self.__trajectory_execution_finished = True
+            self.__trajectory_plan_fraction = total_trajectory_fraction
 
         except Exception as ex:
             rospy.logerr(
