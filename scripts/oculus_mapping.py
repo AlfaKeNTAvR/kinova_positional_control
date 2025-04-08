@@ -19,6 +19,7 @@ import copy
 from std_msgs.msg import (
     Bool,
     Float64,
+    String,
 )
 from geometry_msgs.msg import (Pose)
 
@@ -119,6 +120,8 @@ class OculusMapping:
         }
         self.__trajectory_finished = False
         self.__trajectory_fraction = 0.0
+
+        self.__reset_state_machine_state = 0
 
         # # Public variables:
         self.is_initialized = True
@@ -405,7 +408,10 @@ class OculusMapping:
         ):
             self.__preset_poses_state_machine_state = 1
 
-            rospy.loginfo(f'Entered preset pose selection mode.')
+            # rospy.loginfo(
+            #     f'/{self.ROBOT_NAME}/oculus_mapping: '
+            #     f'in preset pose selection mode.'
+            # )
 
         elif (
             self.__preset_poses_state_machine_state == 1
@@ -416,7 +422,8 @@ class OculusMapping:
             self.__pressed_button = ''
 
             rospy.loginfo(
-                f'Selected pose: '
+                f'/{self.ROBOT_NAME}/oculus_mapping: '
+                f'selected pose: '
                 f'{list(self.__preset_poses.keys())[self.__preset_pose_index]}'
             )
 
@@ -439,10 +446,11 @@ class OculusMapping:
         # State: Button was released.
         elif (self.__preset_poses_state_machine_state == 3):
             if self.__oculus_buttons.primary_button_long:
-                rospy.loginfo(
-                    f'Confirmed pose: '
-                    f'{list(self.__preset_poses.keys())[self.__preset_pose_index]}'
-                )
+                # rospy.loginfo(
+                #     f'/{self.ROBOT_NAME}/oculus_mapping: '
+                #     f'confirmed pose: '
+                #     f'{list(self.__preset_poses.keys())[self.__preset_pose_index]}'
+                # )
 
                 self.__preset_poses_state_machine_state = 4
 
@@ -458,7 +466,8 @@ class OculusMapping:
                     self.__preset_pose_index = 0
 
                 rospy.loginfo(
-                    f'Selected pose: '
+                    f'/{self.ROBOT_NAME}/oculus_mapping: '
+                    f'selected pose: '
                     f'{list(self.__preset_poses.keys())[self.__preset_pose_index]}'
                 )
 
@@ -477,7 +486,8 @@ class OculusMapping:
                     self.__preset_pose_index = len(self.__preset_poses) - 1
 
                 rospy.loginfo(
-                    f'Selected pose: '
+                    f'/{self.ROBOT_NAME}/oculus_mapping: '
+                    f'selected pose: '
                     f'{list(self.__preset_poses.keys())[self.__preset_pose_index]}'
                 )
 
@@ -494,7 +504,10 @@ class OculusMapping:
             if self.__preset_pose_index == 0:
                 return
 
-            rospy.loginfo(f'Move to confirmed preset pose...')
+            # rospy.loginfo(
+            #     f'/{self.ROBOT_NAME}/oculus_mapping: '
+            #     f'move to confirmed preset pose...'
+            # )
             self.__pause_relaxed_ik()
 
             key = list(self.__preset_poses.keys())[self.__preset_pose_index]
@@ -512,11 +525,17 @@ class OculusMapping:
 
             self.__reset_relaxed_ik()
 
-            if self.__trajectory_fraction == 1.0:
-                rospy.loginfo(f'Motion has finished.')
+            # if self.__trajectory_fraction == 1.0:
+            #     rospy.loginfo(
+            #         f'/{self.ROBOT_NAME}/oculus_mapping: '
+            #         f'motion has finished.'
+            #     )
 
-            else:
-                rospy.logwarn(f'Motion planning has failed.')
+            # else:
+            #     rospy.logwarn(
+            #         f'/{self.ROBOT_NAME}/oculus_mapping: '
+            #         f'motion planning has failed.'
+            #     )
 
     def __reset_relaxed_ik_state_machine(self):
         """Resets relaxed IK and clears Kinova faults.
@@ -559,6 +578,11 @@ class OculusMapping:
             return
 
         self.__preset_poses_state_machine()
+
+        self.__preset_pose_mode.publish(self.__preset_pose_selection_mode)
+        self.__preset_pose.publish(
+            list(self.__preset_poses.keys())[self.__preset_pose_index]
+        )
 
         if self.__preset_pose_selection_mode:
             return
