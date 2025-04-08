@@ -232,6 +232,17 @@ class KinovaTeleoperation:
             queue_size=1,
         )
 
+        self.__is_tracking = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/teleoperation/is_tracking',
+            Bool,
+            queue_size=1,
+        )
+        self.__position_only = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/teleoperation/position_only',
+            Bool,
+            queue_size=1,
+        )
+
         # # Topic subscriber:
         rospy.Subscriber(
             f'/{self.ROBOT_NAME}/teleoperation/input_pose',
@@ -1091,6 +1102,9 @@ class KinovaTeleoperation:
 
         if self.__pose_tracking:
             self.__publish_kinova_pose()
+
+        self.__is_tracking.publish(self.__pose_tracking)
+        self.__position_only.publish(self.__control_mode == 'position')
 
     def node_shutdown(self):
         """
