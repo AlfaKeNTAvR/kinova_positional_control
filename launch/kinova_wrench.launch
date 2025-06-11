@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- ============================ SETTINGS ============================= -->
+
+    <!-- Node frequency: the frequency [Hz] which rate.sleep() function will
+    attempt to maintain in the main_loop. -->
+    <arg 
+    name="node_frequency" 
+    default="100"/>
+
+    <arg 
+    name="robot_name" 
+    default="my_gen3"/>
+
+    <!-- ======================== END OF SETTINGS ========================== -->
+    
+    <group ns="/$(arg robot_name)">
+    <!-- Gripper control (optional): -->
+        <node 
+        pkg="kinova_positional_control" 
+        type="kinova_wrench.py" 
+        name="kinova_wrench" 
+        output="screen">
+            <param 
+            name="node_frequency" 
+            value="$(arg node_frequency)"/>
+            <param 
+            name="robot_name" 
+            value="$(arg robot_name)"/>
+        </node>   
+    </group>
+</launch>
