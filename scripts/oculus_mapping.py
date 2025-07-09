@@ -123,6 +123,8 @@ class OculusMapping:
 
         self.__reset_state_machine_state = 0
 
+        self.__kinova_fault_state = False
+
         # # Public variables:
         self.is_initialized = True
 
@@ -209,8 +211,18 @@ class OculusMapping:
             Bool,
             queue_size=1,
         )
+        self.__menu_type = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/oculus_mapping/menu_type',
+            String,
+            queue_size=1,
+        )
         self.__preset_pose = rospy.Publisher(
             f'/{self.ROBOT_NAME}/oculus_mapping/preset_pose',
+            String,
+            queue_size=1,
+        )
+        self.__preset_pose_executing = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/oculus_mapping/preset_pose/executing',
             String,
             queue_size=1,
         )
@@ -236,6 +248,11 @@ class OculusMapping:
             f'/{self.ROBOT_NAME}/preset_poses/trajectory_fraction',
             Float64,
             self.__trajectory_fraction_callback,
+        )
+        rospy.Subscriber(
+            f'/{self.ROBOT_NAME}/fault_state',
+            Bool,
+            self.__fault_state_callback,
         )
 
     # # Dependency status callbacks:
@@ -283,6 +300,16 @@ class OculusMapping:
         """
 
         self.__trajectory_fraction = message.data
+
+    def __fault_state_callback(self, message):
+        """Monitors Kinova fault state topic.
+
+        If the robot is in a fault state, it will reset relaxed IK and clear
+        faults.
+
+        """
+
+        self.__kinova_fault_state = message.data
 
     # # Private methods:
     def __check_initialization(self):
@@ -404,7 +431,8 @@ class OculusMapping:
         # State: Waiting for preset selection activation.
         if (
             self.__preset_poses_state_machine_state == 0
-            and self.__oculus_buttons.primary_button_long
+            and self.__oculus_buttons.secondary_button
+            and self.__reset_state_machine_state == 0
         ):
             self.__preset_poses_state_machine_state = 1
 
@@ -415,7 +443,7 @@ class OculusMapping:
 
         elif (
             self.__preset_poses_state_machine_state == 1
-            and not self.__oculus_buttons.primary_button
+            and not self.__oculus_buttons.secondary_button
         ):
             self.__preset_pose_selection_mode = True
             self.__preset_pose_index = 0
@@ -443,19 +471,15 @@ class OculusMapping:
 
                 self.__preset_poses_state_machine_state = 3
 
-        # State: Button was released.
-        elif (self.__preset_poses_state_machine_state == 3):
-            if self.__oculus_buttons.primary_button_long:
-                # rospy.loginfo(
-                #     f'/{self.ROBOT_NAME}/oculus_mapping: '
-                #     f'confirmed pose: '
-                #     f'{list(self.__preset_poses.keys())[self.__preset_pose_index]}'
-                # )
+            # Confirm the pose.
+            elif self.__oculus_buttons.trigger_button:
 
                 self.__preset_poses_state_machine_state = 4
 
+        # State: Button was released.
+        elif (self.__preset_poses_state_machine_state == 3):
             # Forward selection.
-            elif (
+            if (
                 self.__pressed_button == 'primary_button'
                 and not self.__oculus_buttons.primary_button
             ):
@@ -497,7 +521,7 @@ class OculusMapping:
         # State: Long press button was released, motion has started.
         elif (
             self.__preset_poses_state_machine_state == 4
-            and not self.__oculus_buttons.primary_button
+            and not self.__oculus_buttons.trigger_button
         ):
             self.__preset_poses_state_machine_state = 5
 
@@ -509,6 +533,8 @@ class OculusMapping:
             #     f'move to confirmed preset pose...'
             # )
             self.__pause_relaxed_ik()
+
+            self.__preset_pose_executing.publish('executing')
 
             key = list(self.__preset_poses.keys())[self.__preset_pose_index]
             self.__preset_poses[key]()
@@ -537,18 +563,12 @@ class OculusMapping:
             #         f'motion planning has failed.'
             #     )
 
-    def __reset_relaxed_ik_state_machine(self):
+    def __reset_fault_state(self):
         """Resets relaxed IK and clears Kinova faults.
         
         """
 
-        # State 0: Long press secondary button.
-        if (
-            self.__reset_state_machine_state == 0
-            and self.__oculus_buttons.secondary_button_long
-        ):
-            self.__reset_state_machine_state = 1
-
+        if self.__oculus_buttons.secondary_button:
             try:
                 self.__reset_relaxed_ik()
 
@@ -558,12 +578,22 @@ class OculusMapping:
                     f'\nError calling self.__reset_relaxed_ik(): {ex}'
                 )
 
-        # State 1: Release secondary button.
-        elif (
-            self.__reset_state_machine_state == 1
-            and not self.__oculus_buttons.secondary_button_long
-        ):
-            self.__reset_state_machine_state = 0
+    def __publish_menu_type(self):
+        """Publishes menu type based on the current state of the node.
+
+        The menu type can be 'default', 'preset_poses', or 'fault'.
+        
+        """
+
+        menu_type = 'default'
+
+        if self.__preset_pose_selection_mode:
+            menu_type = 'preset_poses'
+
+        elif self.__kinova_fault_state:
+            menu_type = 'fault'
+
+        self.__menu_type.publish(menu_type)
 
     # # Public methods:
     def main_loop(self):
@@ -571,15 +601,24 @@ class OculusMapping:
         
         """
 
+        self.__publish_menu_type()
+
         self.__check_initialization()
 
         if not self.__is_initialized:
-            self.__reset_relaxed_ik_state_machine()
+            # Exit preset pose selection mode.
+            self.__preset_pose_selection_mode = False
+            self.__preset_poses_state_machine_state = 0
+
+            self.__reset_fault_state()
             return
 
         self.__preset_poses_state_machine()
 
         self.__preset_pose_mode.publish(self.__preset_pose_selection_mode)
+
+        self.__preset_pose_executing.publish('not_executing')
+
         self.__preset_pose.publish(
             list(self.__preset_poses.keys())[self.__preset_pose_index]
         )

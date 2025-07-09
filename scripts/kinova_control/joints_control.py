@@ -224,6 +224,12 @@ class KinovaJointsControl:
             queue_size=1,
         )
 
+        self.__fault_state = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/fault_state',
+            Bool,
+            queue_size=1,
+        )
+
         # # Topic subscriber:
         rospy.Subscriber(
             f'/{self.ROBOT_NAME}/base_feedback/joint_state',
@@ -741,6 +747,8 @@ class KinovaJointsControl:
         """
 
         self.__check_initialization()
+
+        self.__fault_state.publish(self.__kinova_fault_state)
 
         if not self.__is_initialized:
             return
