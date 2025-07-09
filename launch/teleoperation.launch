@@ -45,7 +45,7 @@
 
     <arg
     name="maximum_input_orientation_change"
-    default="8"/>
+    default="20"/>
 
     <!-- If any of dependency or optional subfiles should not be launched (or
     are launched separately) set corresponding argument to "false". -->
