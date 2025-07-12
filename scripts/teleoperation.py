@@ -334,9 +334,10 @@ class KinovaTeleoperation:
             message = 'pose_tracking was enabled.'
             success = True
 
-        elif not request.data and self.__tracking_service_active:
+        elif not request.data:
             self.__pose_tracking = False
             self.__tracking_service_active = False
+            self.__tracking_state_machine_state = 0
 
             rospy.logwarn(
                 (
