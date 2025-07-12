@@ -15,6 +15,7 @@ import rospy
 import numpy as np
 import transformations
 import copy
+import tf2_ros
 
 from std_msgs.msg import (
     Bool,
@@ -23,7 +24,10 @@ from std_msgs.msg import (
 )
 from geometry_msgs.msg import (Pose)
 
-from std_srvs.srv import (Empty)
+from std_srvs.srv import (
+    Empty,
+    SetBool,
+)
 
 from oculus_ros.msg import (ControllerButtons)
 
@@ -166,6 +170,10 @@ class OculusMapping:
             f'/{self.ROBOT_NAME}/teleoperation/reset_relaxed_ik',
             Empty,
         )
+        self.__enable_tracking = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/teleoperation/enable_tracking',
+            SetBool,
+        )
 
         # # Topic publisher:
         self.__node_is_initialized = rospy.Publisher(
@@ -254,6 +262,12 @@ class OculusMapping:
             Bool,
             self.__fault_state_callback,
         )
+
+        # # TF broadcaster:
+
+        # # TF listener:
+        self.__tf_buffer = tf2_ros.Buffer(rospy.Duration(1))
+        tf2_ros.TransformListener(self.__tf_buffer)
 
     # # Dependency status callbacks:
     def __teleoperation_callback(self, message):
@@ -435,11 +449,7 @@ class OculusMapping:
             and self.__reset_state_machine_state == 0
         ):
             self.__preset_poses_state_machine_state = 1
-
-            # rospy.loginfo(
-            #     f'/{self.ROBOT_NAME}/oculus_mapping: '
-            #     f'in preset pose selection mode.'
-            # )
+            self.__enable_tracking(False)
 
         elif (
             self.__preset_poses_state_machine_state == 1
@@ -528,10 +538,6 @@ class OculusMapping:
             if self.__preset_pose_index == 0:
                 return
 
-            # rospy.loginfo(
-            #     f'/{self.ROBOT_NAME}/oculus_mapping: '
-            #     f'move to confirmed preset pose...'
-            # )
             self.__pause_relaxed_ik()
 
             self.__preset_pose_executing.publish('executing')
@@ -543,25 +549,67 @@ class OculusMapping:
             self.__preset_poses_state_machine_state == 5
             and self.__trajectory_finished
         ):
-            self.__preset_poses_state_machine_state = 0
-            self.__preset_pose_selection_mode = False
-
             if self.__preset_pose_index == 0:
+                self.__preset_pose_selection_mode = False
+                self.__preset_poses_state_machine_state = 0
                 return
 
+            self.__preset_poses_state_machine_state = 6
             self.__reset_relaxed_ik()
+            rospy.sleep(0.5)
 
-            # if self.__trajectory_fraction == 1.0:
-            #     rospy.loginfo(
-            #         f'/{self.ROBOT_NAME}/oculus_mapping: '
-            #         f'motion has finished.'
-            #     )
+        elif (self.__preset_poses_state_machine_state == 6):
+            try:
+                positional_difference = 0
+                angular_difference = 0
 
-            # else:
-            #     rospy.logwarn(
-            #         f'/{self.ROBOT_NAME}/oculus_mapping: '
-            #         f'motion planning has failed.'
-            #     )
+                transform = self.__tf_buffer.lookup_transform(
+                    f'{self.ROBOT_NAME}/relaxed_ik_target',
+                    f'{self.ROBOT_NAME}/tool_frame',
+                    rospy.Time(),
+                )
+
+                positional_difference = round(
+                    np.linalg.norm(
+                        np.array(
+                            [
+                                transform.transform.translation.x,
+                                transform.transform.translation.y,
+                                transform.transform.translation.z,
+                            ]
+                        )
+                    ),
+                    4,
+                )
+                angular_difference = np.rad2deg(
+                    2 * np.arctan2(
+                        np.linalg.norm(
+                            np.array(
+                                [
+                                    transform.transform.rotation.x,
+                                    transform.transform.rotation.y,
+                                    transform.transform.rotation.z,
+                                ]
+                            )
+                        ),
+                        transform.transform.rotation.w,
+                    )
+                )
+
+                if angular_difference > 180:
+                    angular_difference = round(360 - angular_difference, 2)
+
+                # Relaxed IK has succefully finished repositioning.
+                if (positional_difference < 0.001 and angular_difference < 2):
+                    self.__preset_pose_selection_mode = False
+                    self.__preset_poses_state_machine_state = 0
+
+            except (
+                tf2_ros.LookupException,
+                tf2_ros.ConnectivityException,
+                tf2_ros.ExtrapolationException,
+            ):
+                pass
 
     def __reset_fault_state(self):
         """Resets relaxed IK and clears Kinova faults.
@@ -617,14 +665,14 @@ class OculusMapping:
 
         self.__preset_pose_mode.publish(self.__preset_pose_selection_mode)
 
-        self.__preset_pose_executing.publish('not_executing')
-
         self.__preset_pose.publish(
             list(self.__preset_poses.keys())[self.__preset_pose_index]
         )
 
         if self.__preset_pose_selection_mode:
             return
+
+        self.__preset_pose_executing.publish('not_executing')
 
         self.__publish_teleoperation_pose()
         self.__teleoperation_tracking_button.publish(
