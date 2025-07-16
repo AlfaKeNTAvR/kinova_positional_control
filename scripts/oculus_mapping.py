@@ -125,7 +125,7 @@ class OculusMapping:
         self.__trajectory_finished = False
         self.__trajectory_fraction = 0.0
 
-        self.__reset_state_machine_state = 0
+        self.__reset_fault_state = 0
 
         self.__kinova_fault_state = False
 
@@ -446,7 +446,7 @@ class OculusMapping:
         if (
             self.__preset_poses_state_machine_state == 0
             and self.__oculus_buttons.secondary_button
-            and self.__reset_state_machine_state == 0
+            and self.__reset_fault_state == 0
         ):
             self.__preset_poses_state_machine_state = 1
             self.__enable_tracking(False)
@@ -611,20 +611,38 @@ class OculusMapping:
             ):
                 pass
 
-    def __reset_fault_state(self):
+    def __reset_fault_state_machine(self):
         """Resets relaxed IK and clears Kinova faults.
         
         """
 
-        if self.__oculus_buttons.secondary_button:
+        if (self.__kinova_fault_state and self.__reset_fault_state == 0):
+            # Exit preset pose selection mode.
+            self.__preset_pose_selection_mode = False
+            self.__preset_poses_state_machine_state = 0
+            self.__reset_fault_state = 1
+
+        elif (
+            self.__reset_fault_state == 1
+            and self.__oculus_buttons.secondary_button
+        ):
             try:
                 self.__reset_relaxed_ik()
+                self.__reset_fault_state = 2
 
             except Exception as ex:
                 rospy.logerr(
                     f'/{self.ROBOT_NAME}/oculus_mapping: '
                     f'\nError calling self.__reset_relaxed_ik(): {ex}'
                 )
+                self.__reset_fault_state = 0
+
+        elif (
+            self.__reset_fault_state == 2
+            and not self.__oculus_buttons.secondary_button
+        ):
+            rospy.sleep(0.5)
+            self.__reset_fault_state = 0
 
     def __publish_menu_type(self):
         """Publishes menu type based on the current state of the node.
@@ -653,12 +671,9 @@ class OculusMapping:
 
         self.__check_initialization()
 
-        if not self.__is_initialized:
-            # Exit preset pose selection mode.
-            self.__preset_pose_selection_mode = False
-            self.__preset_poses_state_machine_state = 0
+        self.__reset_fault_state_machine()
 
-            self.__reset_fault_state()
+        if not self.__is_initialized:
             return
 
         self.__preset_poses_state_machine()
