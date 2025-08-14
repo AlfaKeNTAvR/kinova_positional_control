@@ -53,6 +53,7 @@ class KinovaWrench:
         # # Private variables:
         # NOTE: By default all new class variables should be private.
         self.__wrench_input = WrenchStamped()
+        self.__is_tracking = False
 
         # # Public variables:
 
@@ -114,6 +115,11 @@ class KinovaWrench:
             BaseCyclic_Feedback,
             self.__kinova_feedback_callback,
         )
+        rospy.Subscriber(
+            f'/{self.__ROBOT_NAME}/teleoperation/is_tracking',
+            Bool,
+            self.__teleoperation_is_tracking_callback,
+        )
 
         # # Timers:
         # rospy.Timer(
@@ -172,6 +178,13 @@ class KinovaWrench:
         self.__wrench_input.wrench.torque.z = (
             message.base.tool_external_wrench_torque_z
         )
+
+    def __teleoperation_is_tracking_callback(self, message: Bool):
+        """
+        
+        """
+
+        self.__is_tracking = message.data
 
     # # Timer callbacks:
     # def __some_function_timer(self, event):
@@ -268,6 +281,12 @@ class KinovaWrench:
             or None if the transform fails.
         """
 
+        if not self.__is_tracking:
+            vector3_message = Vector3()
+            self.__falcon_force.publish(vector3_message)
+
+            return
+
         try:
             # Lookup the transform from wrench frame to target frame
             transform = self.__tf_buffer.lookup_transform(
@@ -289,6 +308,7 @@ class KinovaWrench:
             # Transform torque
             torque_in = Vector3Stamped()
             torque_in.header = wrench_stamped.header
+            torque_in.header.stamp = rospy.Time.now()
             torque_in.vector = wrench_stamped.wrench.torque
             torque_out = tf2_geometry_msgs.do_transform_vector3(
                 torque_in,
@@ -313,37 +333,46 @@ class KinovaWrench:
                 ]
             )
 
-            # Initialize buffers on first run
-            if not hasattr(self, '_force_buffer_1000'):
-                self._force_buffer_1000 = deque(maxlen=100)
-                self._force_buffer_100 = deque(maxlen=10)
-                self._last_force_vector = force_vector  # Initialize last seen force
-
-            # Only update long-term buffer on rising edge
-            if np.all(force_vector >= self._last_force_vector):
-                self._force_buffer_1000.append(force_vector)
-
-            # Always update short-term buffer (for trend)
-            self._force_buffer_100.append(force_vector)
-
-            # Update last seen vector
-            self._last_force_vector = force_vector
-
-            # Compute means
-            avg_1000 = np.mean(self._force_buffer_1000, axis=0
-                              ) if self._force_buffer_1000 else np.zeros(3)
-            avg_100 = np.mean(self._force_buffer_100, axis=0
-                             ) if self._force_buffer_100 else np.zeros(3)
-
-            # Compensate force
-            compensated_force = avg_1000 - avg_100
-
             vector3_message = Vector3()
-            vector3_message.x = -compensated_force[1] * -0.25
-            vector3_message.y = compensated_force[2] * -0.25
-            vector3_message.z = -compensated_force[0] * -0.25
+            vector3_message.x = -force_vector[1] * 0.05
+            vector3_message.y = force_vector[2] * 0.1
+            vector3_message.z = -force_vector[0] * 0.05
+
+            rospy.loginfo_throttle(0.5, f'Force Scaled: {vector3_message.y}')
 
             self.__falcon_force.publish(vector3_message)
+
+            # # Initialize buffers on first run
+            # if not hasattr(self, '_force_buffer_1000'):
+            #     self._force_buffer_1000 = deque(maxlen=100)
+            #     self._force_buffer_100 = deque(maxlen=10)
+            #     self._last_force_vector = force_vector  # Initialize last seen force
+
+            # # Only update long-term buffer on rising edge
+            # if np.all(force_vector >= self._last_force_vector):
+            #     self._force_buffer_1000.append(force_vector)
+
+            # # Always update short-term buffer (for trend)
+            # self._force_buffer_100.append(force_vector)
+
+            # # Update last seen vector
+            # self._last_force_vector = force_vector
+
+            # # Compute means
+            # avg_1000 = np.mean(self._force_buffer_1000, axis=0
+            #                   ) if self._force_buffer_1000 else np.zeros(3)
+            # avg_100 = np.mean(self._force_buffer_100, axis=0
+            #                  ) if self._force_buffer_100 else np.zeros(3)
+
+            # # Compensate force
+            # compensated_force = avg_1000 - avg_100
+
+            # vector3_message = Vector3()
+            # vector3_message.x = -compensated_force[1] * -0.25
+            # vector3_message.y = compensated_force[2] * -0.25
+            # vector3_message.z = -compensated_force[0] * -0.25
+
+            # self.__falcon_force.publish(vector3_message)
 
         except Exception as ex:
             rospy.logerr_throttle(
