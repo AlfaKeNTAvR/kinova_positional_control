@@ -643,6 +643,8 @@ class KinovaTeleoperation:
             self.__tracking_state_machine_state = 3
             self.__pose_tracking = False
 
+            self.__reset_rik()
+
         # State 3: Grip button was released.
         elif (
             self.__tracking_state_machine_state == 3
@@ -791,8 +793,9 @@ class KinovaTeleoperation:
                 ),
             )
 
-        self.__tracking_state_machine_state = 0
         self.__pose_tracking = False
+        self.__tracking_state_machine_state = 0
+        self.__reset_rik()
 
     def __publish_kinova_pose(self):
         """

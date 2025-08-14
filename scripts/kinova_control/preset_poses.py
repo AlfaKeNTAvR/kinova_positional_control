@@ -679,7 +679,7 @@ class PresetPoses:
 
         # 1. Convert to PoseStamped().
         pose_stamped = PoseStamped()
-        pose_stamped.header.stamp = rospy.Time.now()
+        pose_stamped.header.stamp = rospy.Time(0)
         pose_stamped.header.frame_id = from_frame
         pose_stamped.pose.position = pose.position
         pose_stamped.pose.orientation = pose.orientation
@@ -688,7 +688,8 @@ class PresetPoses:
         try:
             # NOTE: Requires import tf2_geometry_msgs to work.
             pose_in_new_frame = self.__tf_buffer.transform(
-                object_stamped=pose_stamped, target_frame=to_frame
+                object_stamped=pose_stamped,
+                target_frame=to_frame,
             )
 
             pose_message = Pose()

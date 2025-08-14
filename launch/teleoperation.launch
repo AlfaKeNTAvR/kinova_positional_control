@@ -85,6 +85,9 @@
                 <arg 
                 name="robot_name" 
                 value="$(arg robot_name)"/>
+                <arg 
+                name="settings_file" 
+                value="$(arg robot_name)_settings.yaml"/>
             </include>
         </group>
    
