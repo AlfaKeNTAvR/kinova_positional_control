@@ -24,6 +24,7 @@ import numpy as np
 from copy import (deepcopy)
 
 # # Third party libraries:
+from kinova_positional_control.srv import (SetString)
 
 # # Standart messages and services:
 from std_msgs.msg import (
@@ -147,6 +148,12 @@ class PresetPoses:
             f'/{self.__ROBOT_NAME}/preset_poses/side_yz_grasp_pose',
             Empty,
             self.__side_yz_grasp_pose_handler,
+        )
+
+        rospy.Service(
+            f'/{self.__ROBOT_NAME}/preset_poses/move_to_frame',
+            SetString,
+            self.__move_to_frame_handler,
         )
 
         # # Service subscriber:
@@ -535,6 +542,37 @@ class PresetPoses:
 
         return []
 
+    def __move_to_frame_handler(self, request: SetString):
+        """
+        
+        """
+
+        target_pose = Pose()
+        target_pose.position.x = 0
+        target_pose.position.y = 0
+        target_pose.position.z = 0
+
+        rpy_deg = np.deg2rad(np.array([90, 0, 90]))
+        # rpy_deg = np.deg2rad(np.array([0, 0, 0]))
+
+        quaternion = tf.quaternion_from_euler(
+            rpy_deg[0],
+            rpy_deg[1],
+            rpy_deg[2],
+        )
+
+        target_pose.orientation.x = quaternion[0]
+        target_pose.orientation.y = quaternion[1]
+        target_pose.orientation.z = quaternion[2]
+        target_pose.orientation.w = quaternion[3]
+
+        self.__set_target_pose(
+            target_pose=target_pose,
+            target_frame=request.data,
+        )
+
+        return True
+
     # # Topic callbacks:
 
     # # Timer callbacks:
@@ -848,6 +886,23 @@ class PresetPoses:
             name='mobile_base',
             pose=box_pose_stamped,
             size=(0.58, 0.54, 0.36),
+        )
+
+        box_pose_stamped = PoseStamped()
+        box_pose_stamped.header.stamp = rospy.Time.now()
+        box_pose_stamped.header.frame_id = 'base_link'
+        box_pose_stamped.pose.position.x = 0
+        box_pose_stamped.pose.position.y = 0
+        box_pose_stamped.pose.position.z = 1.8 / 2
+        box_pose_stamped.pose.orientation.x = 0
+        box_pose_stamped.pose.orientation.y = 0
+        box_pose_stamped.pose.orientation.z = 0
+        box_pose_stamped.pose.orientation.w = 1
+
+        self.__scene.add_box(
+            name='torso',
+            pose=box_pose_stamped,
+            size=(0.18, 0.12, 1.8),
         )
 
     # # Public methods:

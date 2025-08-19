@@ -22,7 +22,10 @@ from std_msgs.msg import (
     Float64,
     String,
 )
-from geometry_msgs.msg import (Pose)
+from geometry_msgs.msg import (
+    Pose,
+    Vector3,
+)
 
 from std_srvs.srv import (
     Empty,
@@ -30,6 +33,7 @@ from std_srvs.srv import (
 )
 
 from oculus_ros.msg import (ControllerButtons)
+from kinova_positional_control.srv import (SetString)
 
 
 class OculusMapping:
@@ -129,6 +133,9 @@ class OculusMapping:
 
         self.__kinova_fault_state = False
 
+        self.__use_falcon_pose = False
+        self.__falcon_scale = 1
+
         # # Public variables:
         self.is_initialized = True
 
@@ -156,6 +163,17 @@ class OculusMapping:
         }
 
         # # Service provider:
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/oculus_mapping/use_falcon_pose',
+            SetBool,
+            self.__use_falcon_pose_handler,
+        )
+
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/oculus_mapping/move_to_frame',
+            SetString,
+            self.__move_to_frame_handler,
+        )
 
         # # Service subscriber:
         self.__pause_relaxed_ik = rospy.ServiceProxy(
@@ -173,6 +191,19 @@ class OculusMapping:
         self.__enable_tracking = rospy.ServiceProxy(
             f'/{self.ROBOT_NAME}/teleoperation/enable_tracking',
             SetBool,
+        )
+        self.__set_change_scale = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/teleoperation/set_change_scale',
+            Empty,
+        )
+        self.__line_follower_change_scale = rospy.ServiceProxy(
+            f'/line_follower/change_scale',
+            Empty,
+        )
+
+        self.__move_to_frame = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/preset_poses/move_to_frame',
+            SetString,
         )
 
         # # Topic publisher:
@@ -235,6 +266,12 @@ class OculusMapping:
             queue_size=1,
         )
 
+        self.__falcon_scale_pub = rospy.Publisher(
+            f'/{self.ROBOT_NAME}/oculus_mapping/falcon_scale',
+            String,
+            queue_size=1,
+        )
+
         # # Topic subscriber:
         rospy.Subscriber(
             f'/{self.CONTROLLER_SIDE}/controller_feedback/pose',
@@ -263,6 +300,12 @@ class OculusMapping:
             self.__fault_state_callback,
         )
 
+        rospy.Subscriber(
+            f'/falconPos_converted',
+            Vector3,
+            self.__falcon_position_callback,
+        )
+
         # # TF broadcaster:
 
         # # TF listener:
@@ -278,12 +321,47 @@ class OculusMapping:
         self.__dependency_status['teleoperation'] = message.data
 
     # # Service handlers:
+    def __use_falcon_pose_handler(self, request):
+        """
+
+        """
+
+        self.__falcon_scale = rospy.get_param(
+            f'{rospy.get_name()}/falcon_scale'
+        )
+
+        self.__set_change_scale()
+        self.__line_follower_change_scale()
+
+        self.__use_falcon_pose = request.data
+
+        return []
+
+    def __move_to_frame_handler(self, request: SetString):
+        """
+
+        """
+
+        self.__pause_relaxed_ik()
+
+        self.__move_to_frame(request.data)
+
+        while not self.__trajectory_finished:
+            rospy.sleep(0.1)
+
+        self.__reset_relaxed_ik()
+        rospy.sleep(0.5)
+
+        return True
 
     # # Topic callbacks:
     def __oculus_pose_callback(self, message):
         """
 
         """
+
+        if self.__use_falcon_pose:
+            return
 
         self.__input_pose['position'][0] = message.position.x
         self.__input_pose['position'][1] = message.position.y
@@ -324,6 +402,24 @@ class OculusMapping:
         """
 
         self.__kinova_fault_state = message.data
+
+    def __falcon_position_callback(self, message):
+        """
+
+        """
+
+        if not self.__use_falcon_pose:
+            return
+
+        self.__input_pose['position'] = self.__falcon_scale * np.array(
+            [
+                message.x,
+                message.y,
+                message.z,
+            ]
+        )
+
+        self.__input_pose['orientation'] = np.array([1.0, 0.0, 0.0, 0.0])
 
     # # Private methods:
     def __check_initialization(self):
@@ -599,8 +695,15 @@ class OculusMapping:
                 if angular_difference > 180:
                     angular_difference = round(360 - angular_difference, 2)
 
+                rospy.logwarn_throttle(
+                    1,
+                    (f'\n{positional_difference=}'
+                     f'\n{angular_difference=}')
+                )
+
                 # Relaxed IK has succefully finished repositioning.
-                if (positional_difference < 0.001 and angular_difference < 2):
+                # TODO: Add timeout.
+                if (positional_difference < 0.015 and angular_difference < 2):
                     self.__preset_pose_selection_mode = False
                     self.__preset_poses_state_machine_state = 0
 
@@ -688,6 +791,7 @@ class OculusMapping:
             return
 
         self.__preset_pose_executing.publish('not_executing')
+        self.__falcon_scale_pub.publish(String(str(self.__falcon_scale)))
 
         self.__publish_teleoperation_pose()
         self.__teleoperation_tracking_button.publish(

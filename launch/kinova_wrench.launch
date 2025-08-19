@@ -27,6 +27,19 @@
             <param 
             name="robot_name" 
             value="$(arg robot_name)"/>
-        </node>   
+        </node>  
+
+        <node 
+        pkg="kinova_positional_control" 
+        type="filtered_kinova_wrench.py" 
+        name="filtered_kinova_wrench" 
+        output="screen">
+            <param 
+            name="node_frequency" 
+            value="$(arg node_frequency)"/>
+            <param 
+            name="robot_name" 
+            value="$(arg robot_name)"/>
+        </node>    
     </group>
 </launch>

@@ -17,6 +17,7 @@ import transformations
 from ast import (literal_eval)
 import tf2_ros
 import tf2_geometry_msgs  # Is required for tf2_ros.Buffer.transform().
+from copy import (deepcopy)
 
 from std_msgs.msg import (
     Bool,
@@ -87,7 +88,7 @@ class KinovaTeleoperation:
         self.__tracking_state_machine_state = 0
         self.__gripper_state_machine_state = 0
         self.__mode_state_machine_state = 0
-        self.__control_mode = 'position'
+        self.__control_mode = 'position'  # 'position', 'full' or 'velocity' or 'fixed'
 
         self.__pose_tracking = False
 
@@ -95,7 +96,18 @@ class KinovaTeleoperation:
         # call. These conditions are tracked to prevent manual switch with
         # buttons while in automatic mode.
         self.__tracking_service_active = False
+        self.__allow_tracking = True
         self.__control_mode_service_active = False
+
+        self.__open_gripper_position = 0.0
+        self.__close_gripper_position = 1.0
+        self.__gripper_mode = 'position'  # 'position' or 'force'
+
+        # Vecloti control variables:
+        self.__input_pose_neutral = None
+        self.__previous_time = None
+
+        self.__change_scaling = False
 
         # # Public variables:
         # Last commanded Relaxed IK pose is required to compensate controller
@@ -110,10 +122,6 @@ class KinovaTeleoperation:
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
-
-        self.__open_gripper_position = 0.0
-        self.__close_gripper_position = 1.0
-        self.__gripper_mode = 'force'  # 'position' or 'force'
 
         # # Initialization and dependency status topics:
         self.__is_initialized = False
@@ -160,9 +168,29 @@ class KinovaTeleoperation:
             self.__enable_tracking_handler,
         )
         rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/allow_tracking',
+            SetBool,
+            self.__allow_tracking_handler,
+        )
+        rospy.Service(
             f'/{self.ROBOT_NAME}/teleoperation/enable_full_mode',
             SetBool,
             self.__enable_full_mode_handler,
+        )
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/enable_velocity_mode',
+            SetBool,
+            self.__enable_velocity_mode_handler,
+        )
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/enable_fixed_orientation_mode',
+            SetBool,
+            self.__enable_fixed_orientation_handler,
+        )
+        rospy.Service(
+            f'/{self.ROBOT_NAME}/teleoperation/set_change_scale',
+            Empty,
+            self.__set_change_scale_handler,
         )
 
         rospy.Service(
@@ -316,7 +344,7 @@ class KinovaTeleoperation:
         if not self.__is_initialized:
             return success, message
 
-        if request.data and not self.__tracking_service_active:
+        if request.data:
             self.__tracking_service_active = True
 
             rospy.logwarn(
@@ -347,7 +375,47 @@ class KinovaTeleoperation:
                 ),
             )
 
+            self.__reset_rik()
             message = 'pose_tracking was disabled.'
+            success = True
+
+        return success, message
+
+    def __allow_tracking_handler(self, request):
+        """
+        
+        """
+
+        message = ''
+        success = False
+
+        if not self.__is_initialized:
+            return success, message
+
+        if request.data:
+            self.__allow_tracking = True
+
+            rospy.logwarn(
+                (
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    'tracking is allowed.\n'
+                ),
+            )
+
+            message = 'tracking is allowed'
+            success = True
+
+        elif not request.data:
+            self.__allow_tracking = False
+
+            rospy.logwarn(
+                (
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    'tracking is not allowed.\n'
+                ),
+            )
+
+            message = 'tracking is not allowed'
             success = True
 
         return success, message
@@ -397,6 +465,15 @@ class KinovaTeleoperation:
             success = True
 
         return success, message
+
+    def __set_change_scale_handler(self, request):
+        """
+        
+        """
+
+        self.__change_scaling = True
+
+        return []
 
     def __pause_relaxed_ik_handler(self, request):
         """
@@ -464,6 +541,70 @@ class KinovaTeleoperation:
             message = 'Gripper FORCE mode.'
 
         success = True
+
+        return success, message
+
+    def __enable_velocity_mode_handler(self, request: SetBool):
+        """Enables velocity mode.
+
+        """
+        if request.data:
+            self.__control_mode = 'velocity'
+
+        else:
+            self.__control_mode = 'position'
+
+        if self.__is_tracking:
+            self.__calculate_compensation()
+
+        success = True
+        message = ''
+
+        rospy.logwarn(
+            (
+                f'/{self.ROBOT_NAME}/teleoperation: '
+                f'control_mode was changed to {self.__control_mode} by a service call.\n'
+            ),
+        )
+
+        return success, message
+
+    def __enable_fixed_orientation_handler(self, request: SetBool):
+        """
+        
+        """
+
+        if request.data:
+            self.__control_mode = rospy.get_param(
+                f'/{self.ROBOT_NAME}/teleoperation/fixed_mode'
+            )
+
+        else:
+            self.__control_mode = 'position'
+
+        if self.__is_tracking:
+            try:
+                self.__calculate_compensation()
+            except Exception as e:
+                rospy.logerr(
+                    (
+                        f'/{self.ROBOT_NAME}/teleoperation: '
+                        f'Failed to calculate compensation: {e}'
+                    ),
+                )
+                self.__stop_tracking()
+                self.__enable_pid(True)
+                self.__clear_arm_faults()
+
+        success = True
+        message = ''
+
+        rospy.logwarn(
+            (
+                f'/{self.ROBOT_NAME}/teleoperation: '
+                f'control_mode was changed to {self.__control_mode} by a service call.\n'
+            ),
+        )
 
         return success, message
 
@@ -642,6 +783,7 @@ class KinovaTeleoperation:
 
             self.__tracking_state_machine_state = 3
             self.__pose_tracking = False
+            # self.__change_scaling = False
 
             self.__reset_rik()
 
@@ -750,6 +892,12 @@ class KinovaTeleoperation:
         
         """
 
+        if self.__control_mode == 'velocity':
+            self.__input_pose_neutral = deepcopy(self.__input_pose)
+            self.__previous_time = rospy.Time.now()
+
+            return
+
         self.input_relaxed_ik_difference['position'] = (
             self.__input_pose['position']
             - self.last_relaxed_ik_pose['position']
@@ -794,6 +942,7 @@ class KinovaTeleoperation:
             )
 
         self.__pose_tracking = False
+        # self.__change_scaling = False
         self.__tracking_state_machine_state = 0
         self.__reset_rik()
 
@@ -826,15 +975,81 @@ class KinovaTeleoperation:
             'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
         }
 
-        compensated_input_pose['position'] = (
-            self.__input_pose['position']
-            - self.input_relaxed_ik_difference['position']
-        )
+        if self.__control_mode != 'velocity':
+            compensated_input_pose['position'] = (
+                self.__input_pose['position']
+                - self.input_relaxed_ik_difference['position']
+            )
 
-        # Use fixed (last commanded) orientation.
-        compensated_input_pose['orientation'] = (
-            self.last_relaxed_ik_pose['orientation']
-        )
+            # Use fixed (last commanded) orientation.
+            compensated_input_pose['orientation'] = (
+                self.last_relaxed_ik_pose['orientation']
+            )
+
+            # Fixed orientation:
+            if self.__control_mode == 'fixed_front':
+                compensated_input_pose['orientation'] = np.array(
+                    [0.5, 0.5, 0.5, 0.5]
+                )
+
+            elif self.__control_mode == 'fixed_top':
+                compensated_input_pose['orientation'] = np.array(
+                    [0.0, -0.707, -0.707, 0.0]
+                )
+
+        # Velocity control mode is limited to position only.
+        elif self.__control_mode == 'velocity':
+            scale = 2
+
+            velocity_vector = self.__velocity_from_deviation(
+                current=self.__input_pose['position'],
+                setpoint=self.__input_pose_neutral['position'],
+                axis_scale=np.array([scale, scale, scale]),
+                dead_zone_radius=0.01,
+            )
+
+            target_x = (
+                self.last_relaxed_ik_pose['position'][0] + velocity_vector[0] *
+                (rospy.Time.now() - self.__previous_time).to_sec()
+            )
+            target_y = (
+                self.last_relaxed_ik_pose['position'][1] + velocity_vector[1] *
+                (rospy.Time.now() - self.__previous_time).to_sec()
+            )
+            target_z = (
+                self.last_relaxed_ik_pose['position'][2] + velocity_vector[2] *
+                (rospy.Time.now() - self.__previous_time).to_sec()
+            )
+
+            compensated_input_pose['position'] = np.array(
+                [
+                    target_x,
+                    target_y,
+                    target_z,
+                ]
+            )
+            # Fixed orientation.
+            compensated_input_pose['orientation'] = np.array(
+                [0.5, 0.5, 0.5, 0.5]
+            )
+
+            self.__previous_time = rospy.Time.now()
+
+            # rospy.loginfo_throttle(
+            #     1,
+            #     (
+            #         f'/{self.ROBOT_NAME}/teleoperation:'
+            #         f'x: {np.round(velocity_vector[0], 3)}, y: {np.round(velocity_vector[1], 3)}, z: {np.round(velocity_vector[2], 3)}'
+            #         f'\nCompensated input pose: {np.round(compensated_input_pose["position"], 3)}'
+            #     ),
+            # )
+            # return
+
+        elif self.__control_mode in ['fixed_front', 'fixed_top']:
+            # Use fixed (last commanded) orientation.
+            compensated_input_pose['orientation'] = (
+                self.last_relaxed_ik_pose['orientation']
+            )
 
         # Use oculus orientation.
         if self.__control_mode == 'full':
@@ -889,21 +1104,47 @@ class KinovaTeleoperation:
         )
 
         if (input_position_difference > self.MAXIMUM_INPUT_POSITION_CHANGE):
-            self.__stop_tracking()
+            if not self.__change_scaling:
+                self.__stop_tracking()
 
-            rospy.logerr(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    f'\nChange in input POSITION exceeded maximum allowed value! '
-                    f'\n- Current input: {np.round(compensated_input_pose["position"], 3)}'
-                    f'\n- Previous input: {np.round(self.last_relaxed_ik_pose["position"], 3)}'
-                    f'\n- Difference (absolute): {np.round(input_position_difference, 3)}'
-                    f'\n- Allowed difference threshold: {np.round(self.MAXIMUM_INPUT_POSITION_CHANGE, 3)}'
-                    '\nStopped input tracking.\n'
-                ),
+                rospy.logerr(
+                    (
+                        f'/{self.ROBOT_NAME}/teleoperation: '
+                        f'\nChange in input POSITION exceeded maximum allowed value! '
+                        f'\n- Current input: {np.round(compensated_input_pose["position"], 3)}'
+                        f'\n- Previous input: {np.round(self.last_relaxed_ik_pose["position"], 3)}'
+                        f'\n- Difference (absolute): {np.round(input_position_difference, 3)}'
+                        f'\n- Allowed difference threshold: {np.round(self.MAXIMUM_INPUT_POSITION_CHANGE, 3)}'
+                        '\nStopped input tracking.\n'
+                    ),
+                )
+
+                return
+
+            self.__calculate_compensation()
+
+            compensated_input_pose['position'] = (
+                self.__input_pose['position']
+                - self.input_relaxed_ik_difference['position']
             )
 
-            return
+            # Use fixed (last commanded) orientation.
+            compensated_input_pose['orientation'] = (
+                self.last_relaxed_ik_pose['orientation']
+            )
+
+            # Fixed orientation:
+            if self.__control_mode == 'fixed_front':
+                compensated_input_pose['orientation'] = np.array(
+                    [0.5, 0.5, 0.5, 0.5]
+                )
+
+            elif self.__control_mode == 'fixed_top':
+                compensated_input_pose['orientation'] = np.array(
+                    [0.0, -0.707, -0.707, 0.0]
+                )
+
+            self.__change_scaling = False
 
         # Protection against too big angular input changes. Controller loses
         # connection, goes out-of-sight, goes into a sleep mode,  user input is
@@ -1024,11 +1265,11 @@ class KinovaTeleoperation:
             return transform
 
         except Exception as ex:
-            rospy.logerr_throttle(
-                1,
-                f'/{self.ROBOT_NAME}/teleoperation:'
-                f'\nError in __transform_lookup: {ex}',
-            )
+            # rospy.logerr_throttle(
+            #     1,
+            #     f'/{self.ROBOT_NAME}/teleoperation:'
+            #     f'\nError in __transform_lookup: {ex}',
+            # )
             return None
 
     def __get_relaxed_ik_last_pose(self):
@@ -1089,6 +1330,59 @@ class KinovaTeleoperation:
         self.__clear_arm_faults()
         self.__resume_relaxed_ik()
 
+    def __velocity_from_deviation(
+        self,
+        current: np.ndarray,
+        setpoint: np.ndarray,
+        axis_scale: np.ndarray,
+        dead_zone_radius: float = 0.0,
+        max_speed: np.ndarray = np.array([1.0, 1.0, 1.0]),
+    ) -> np.ndarray:
+        """
+        Compute a velocity vector based on position deviation with:
+        - spherical dead zone (no motion inside the radius),
+        - per-axis scaling gains.
+
+        Args:
+            current:   np.array([x, y, z])  current position
+            setpoint:  np.array([x, y, z])  reference position (node shell)
+            axis_scale:np.array([sx, sy, sz]) per-axis scaling (velocity per unit error)
+            dead_zone_radius: float, radius of the zero-velocity sphere around the setpoint
+            max_speed: optional np.array([vx, vy, vz]) per-axis speed limits (abs clamp)
+
+        Returns:
+            np.array([vx, vy, vz]) velocity command
+        """
+        current = np.asarray(current, dtype=float)
+        setpoint = np.asarray(setpoint, dtype=float)
+        axis_scale = np.asarray(axis_scale, dtype=float)
+
+        # Deviation vector and distance from setpoint
+        e = current - setpoint
+        dist = np.linalg.norm(e)
+
+        # Inside the dead zone: no motion
+        if dist <= dead_zone_radius or dist == 0.0:
+            return np.zeros(3, dtype=float)
+
+        # How far outside the dead zone we are (scalar)
+        excess = dist - dead_zone_radius
+
+        # Direction from setpoint to current
+        direction = e / dist  # unit vector
+
+        # Scale velocity so that magnitude grows linearly with how far outside the dead zone.
+        # Start with an isotropic magnitude (excess) along 'direction', then apply per-axis gains.
+        # Result: v = (excess * direction) ⊙ axis_scale
+        v = (excess * direction) * axis_scale
+
+        # Optional per-axis saturation
+        if max_speed is not None:
+            max_speed = np.asarray(max_speed, dtype=float)
+            v = np.clip(v, -np.abs(max_speed), np.abs(max_speed))
+
+        return v
+
     # # Public methods:
     def main_loop(self):
         """
@@ -1100,7 +1394,9 @@ class KinovaTeleoperation:
         if not self.__is_initialized:
             return
 
-        self.__tracking_state_machine()
+        if self.__allow_tracking:
+            self.__tracking_state_machine()
+
         self.__gripper_state_machine()
         self.__mode_state_machine()
 
@@ -1108,7 +1404,14 @@ class KinovaTeleoperation:
             self.__publish_kinova_pose()
 
         self.__is_tracking.publish(self.__pose_tracking)
-        self.__position_only.publish(self.__control_mode == 'position')
+
+        self.__position_only.publish(
+            self.__control_mode in [
+                'position',
+                'fixed_top',
+                'fixed_front',
+            ]
+        )
 
     def node_shutdown(self):
         """

@@ -17,7 +17,10 @@ import numpy as np
 # # Third party libraries:
 
 # # Standart messages and services:
-from std_msgs.msg import (Bool)
+from std_msgs.msg import (
+    Bool,
+    Float64,
+)
 from std_srvs.srv import (SetBool)
 from geometry_msgs.msg import (
     WrenchStamped,
@@ -98,14 +101,29 @@ class KinovaWrench:
 
         # # Topic publisher:
         self.__transformed_wrench = rospy.Publisher(
-            f'{self.__NODE_NAME}/wrench',
+            f'{self.__NODE_NAME}/wrench_raw',
             WrenchStamped,
             queue_size=1,
         )
 
-        self.__falcon_force = rospy.Publisher(
-            f'/falconForce',
-            Vector3,
+        # self.__falcon_force = rospy.Publisher(
+        #     f'/falconForce',
+        #     Vector3,
+        #     queue_size=1,
+        # )
+        self.__x_force_gain = rospy.Publisher(
+            f'/x_force_gain',
+            Float64,
+            queue_size=1,
+        )
+        self.__y_force_gain = rospy.Publisher(
+            f'/y_force_gain',
+            Float64,
+            queue_size=1,
+        )
+        self.__z_force_gain = rospy.Publisher(
+            f'/z_force_gain',
+            Float64,
             queue_size=1,
         )
 
@@ -281,12 +299,6 @@ class KinovaWrench:
             or None if the transform fails.
         """
 
-        if not self.__is_tracking:
-            vector3_message = Vector3()
-            self.__falcon_force.publish(vector3_message)
-
-            return
-
         try:
             # Lookup the transform from wrench frame to target frame
             transform = self.__tf_buffer.lookup_transform(
@@ -333,14 +345,27 @@ class KinovaWrench:
                 ]
             )
 
-            vector3_message = Vector3()
-            vector3_message.x = -force_vector[1] * 0.05
-            vector3_message.y = force_vector[2] * 0.1
-            vector3_message.z = -force_vector[0] * 0.05
+            # vector3_message = Vector3()
+            # vector3_message.x = -force_vector[1]
+            # vector3_message.y = force_vector[2]
+            # vector3_message.z = -force_vector[0]
 
-            rospy.loginfo_throttle(0.5, f'Force Scaled: {vector3_message.y}')
+            # rospy.loginfo_throttle(0.5, f'Force Scaled: {vector3_message.y}')
 
-            self.__falcon_force.publish(vector3_message)
+            if not self.__is_tracking:
+                vector3_message = Vector3()
+                # self.__falcon_force.publish(vector3_message)
+
+                self.__x_force_gain.publish(1)
+                self.__y_force_gain.publish(1)
+                self.__z_force_gain.publish(1)
+
+                return
+
+            # self.__falcon_force.publish(vector3_message)
+            self.__x_force_gain.publish(-force_vector[1])
+            self.__y_force_gain.publish(force_vector[2])
+            self.__z_force_gain.publish(-force_vector[0])
 
             # # Initialize buffers on first run
             # if not hasattr(self, '_force_buffer_1000'):
@@ -374,11 +399,12 @@ class KinovaWrench:
 
             # self.__falcon_force.publish(vector3_message)
 
-        except Exception as ex:
-            rospy.logerr_throttle(
-                1, f'/{self.__ROBOT_NAME}/kinova_wrench:'
-                f'\nError in __publish_transformed_wrench: {ex}'
-            )
+        except (
+            tf2_ros.LookupException,
+            tf2_ros.ConnectivityException,
+            tf2_ros.ExtrapolationException,
+        ):
+            pass
 
     # # Public methods:
     # NOTE: By default all new class methods should be private.

@@ -59,6 +59,7 @@ add_service_files(
   PidVelocityLimit.srv
   GripperForceGrasping.srv
   GripperPosition.srv
+  SetString.srv
 )
 
 ## Generate actions in the 'action' folder

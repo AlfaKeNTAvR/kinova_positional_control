@@ -28,6 +28,7 @@ from kortex_driver.msg import (
 from kortex_driver.srv import (
     Stop,
     Base_ClearFaults,
+    ApplyEmergencyStop,
 )
 from kinova_positional_control.srv import (PidVelocityLimit)
 
@@ -126,6 +127,10 @@ class KinovaJointsControl:
         self.__stop_arm_srv = rospy.ServiceProxy(
             f'/{self.ROBOT_NAME}/base/stop',
             Stop,
+        )
+        self.__e_stop = rospy.ServiceProxy(
+            f'/{self.ROBOT_NAME}/base/apply_emergency_stop',
+            ApplyEmergencyStop,
         )
 
         # # Topic publisher:
@@ -282,6 +287,12 @@ class KinovaJointsControl:
             f'/{self.ROBOT_NAME}/joint_7/control_effort',
             Float64,
             self.__control_effort_7_callback,
+        )
+
+        rospy.Subscriber(
+            f'/{self.ROBOT_NAME}/e_stop',
+            Bool,
+            self.__e_stop_callback,
         )
 
     # # Dependency status callbacks:
@@ -446,6 +457,14 @@ class KinovaJointsControl:
         # Block callback function until all components are initialized.
         if self.__is_initialized:
             self.__goal_velocities[6] = msg.data
+
+    def __e_stop_callback(self, message: Bool):
+        """
+        
+        """
+
+        if message.data:
+            self.__e_stop()
 
     # # Private methods:
     def __check_initialization(self):
