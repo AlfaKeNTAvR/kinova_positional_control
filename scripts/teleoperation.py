@@ -1,1501 +1,936 @@
 #!/usr/bin/env python
-"""Implements teleoperation module for positional control.
+"""Teleoperation node — service-driven robot API for the Kinova arms.
 
-TODO: Add detailed description.
+All button-mapping and control logic lives in .mapping.json files executed by
+mapping_player.py.  This node exposes clean services so that mapping files can
+start/stop tracking, toggle the gripper, and change the control mode without
+any hardcoded button logic here.
 
-Author (s):
-    1. Nikita Boguslavskii (bognik3@gmail.com), Human-Inspired Robotics (HiRo)
-       lab, Worcester Polytechnic Institute (WPI), 2023.
-    2. Lorena Genua (lorena.genua@gmail.com), Human-Inspired Robotics (HiRo)
-       lab, Worcester Polytechnic Institute (WPI), 2023.
+Services provided
+-----------------
+  start_tracking               (Empty)    begin tracking; calculate compensation
+  stop_tracking                (Empty)    stop tracking; reset relaxed-IK
+  gripper_toggle               (SetBool)  True = close (force/position grasp), False = open
+  set_full_mode                (SetBool)  True = full (pos+ori), False = position only
+  allow_tracking               (SetBool)  enable/disable tracking permission externally
+  enable_velocity_mode         (SetBool)  True = velocity control, False = position
+  enable_fixed_orientation_mode(SetBool)  True = fixed orientation (reads /<robot>/teleoperation/fixed_mode param)
+  pause_relaxed_ik             (Empty)
+  resume_relaxed_ik            (Empty)
+  reset_relaxed_ik             (Empty)
+  gripper/set_open_position    (GripperPosition)
+  gripper/set_close_position   (GripperPosition)
+  gripper/enable_position_mode (SetBool)
 
+Topics IN
+---------
+  input_pose             (Pose)    desired EE pose; consumed each tick while tracking
+  teleoperation/floor_z  (Float64) minimum EE height in global base_link Z (m).
+                                   Publishes a std_msgs/Float64 at any time to update.
+                                   Set to a very negative number to disable (default: -inf).
+                                   Acts as a motion constraint: downward commands are
+                                   suppressed when the EE is at or below this height;
+                                   tracking is never interrupted by the floor.
+
+Topics OUT
+----------
+  is_initialized         (Bool)
+  is_tracking            (Bool)
+  position_only          (Bool)
+  current_ee_pose        (Pose)    EE pose in global base_link frame
+  current_ee_pose_local  (Pose)    EE pose in {robot_name}/base_link frame — used by
+                                   the joystick mapping's arm-local integrators so that
+                                   accumulated positions stay in the arm's own frame,
+                                   eliminating axis cross-talk from the TF rotation
+  floor_z_input_space    (Float64) The motion floor translated into input_pose Z space:
+                                   floor_z + diff.z  — the raw input Z value that
+                                   corresponds to the arm being exactly at floor_z.
+                                   Pose-mapping clients clamp their raw controller Z to
+                                   this value so the 'goal' never drifts below the floor
+                                   while the floor constraint is active.
+                                   Published as -inf when floor is disabled, tracking is
+                                   stopped, or control mode is velocity.
+
+Parameters
+----------
+  robot_name                          (str)   default 'my_gen3'
+  compensate_orientation              (bool)  default True
+  convenience_compensation            (list)  default [0,0,0]
+  maximum_input_position_change       (float) default 0.1 m
+  maximum_input_orientation_change    (float) default 30 deg
+  node_frequency                      (int)   default 1000 Hz
+  input_pose_frame                    (str)   'base_link' (default) or 'arm_local'
+    'base_link':  input_pose is in the global base_link frame.  The node applies
+                  a TF transform to {robot_name}/base_link before publishing to
+                  relaxed-IK.  Original behaviour.
+    'arm_local':  input_pose is already in {robot_name}/base_link.  The TF transform
+                  step is skipped.  Use this together with current_ee_pose_local seeding
+                  and the joystick mapping's arm-local integrators to eliminate the axis
+                  cross-talk that occurs when global-frame integrators are rotated into
+                  the arm's base frame.  All internal references (compensation diff, jump
+                  check) run in the arm-local frame when this mode is active.
+
+Authors:
+    1. Nikita Boguslavskii (bognik3@gmail.com), HiRo lab, WPI, 2023.
+    2. Lorena Genua (lorena.genau@gmail.com), HiRo lab, WPI, 2023.
 """
 
 import rospy
 import numpy as np
 import transformations
-from ast import (literal_eval)
+from ast import literal_eval
+from copy import deepcopy
 import tf2_ros
-import tf2_geometry_msgs  # Is required for tf2_ros.Buffer.transform().
-from copy import (deepcopy)
+import tf2_geometry_msgs  # required for tf2_ros.Buffer.transform()
 
-from std_msgs.msg import (
-    Bool,
-    Float64,
-)
-from std_srvs.srv import (
-    SetBool,
-    Empty,
-)
-from geometry_msgs.msg import (
-    Pose,
-    PoseStamped,
-)
+from std_msgs.msg import Bool, Float64
+from std_srvs.srv import SetBool, Empty
+from geometry_msgs.msg import Pose, PoseStamped
 
-from kinova_positional_control.srv import (
-    GripperForceGrasping,
-    GripperPosition,
-)
-from relaxed_ik_ros1.msg import (EEPoseGoals)
-from kortex_driver.srv import (Base_ClearFaults)
+from kinova_positional_control.srv import GripperForceGrasping, GripperPosition
+from relaxed_ik_ros1.msg import EEPoseGoals
+from kortex_driver.srv import Base_ClearFaults
 
 
 class KinovaTeleoperation:
-    """
-    
-    """
 
     def __init__(
         self,
         robot_name,
-        tracking_mode,
         compensate_orientation,
         convenience_compensation,
         maximum_input_position_change,
         maximum_input_orientation_change,
+        input_pose_frame='base_link',
     ):
-        """
-        
-        """
-
-        if tracking_mode not in ['hold', 'toggle']:
-            raise ValueError(
-                'tracking_mode should be either "hold" or "press".'
-            )
-
-        # # Private constants:
-
-        # # Public constants:
         self.ROBOT_NAME = robot_name
-        self.TRACKING_MODE = tracking_mode
         self.COMPENSATE_ORIENTATION = compensate_orientation
         self.CONVENIENCE_COMPENSATION = convenience_compensation
-        self.MAXIMUM_INPUT_POSITION_CHANGE = maximum_input_position_change
-        self.MAXIMUM_INPUT_ORIENTATION_CHANGE = maximum_input_orientation_change
+        self.MAX_POS_CHANGE = maximum_input_position_change
+        self.MAX_ORI_CHANGE = maximum_input_orientation_change
 
-        # # Private variables:
+        # 'base_link'  — default: input_pose is in global base_link; TF applied before publish
+        # 'arm_local'  — input_pose is in {robot_name}/base_link; no TF needed.
+        #                All compensation and jump-check maths run in arm-local frame.
+        self.INPUT_POSE_FRAME = input_pose_frame
+
+        # ── State ─────────────────────────────────────────────────────────────
         self.__input_pose = {
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+            'position':    np.array([0., 0., 0.]),
+            'orientation': np.array([1., 0., 0., 0.]),
         }
-        self.__tracking_button = False
-        self.__gripper_button = False
-        self.__mode_button = False
-
-        self.__gripper_button_long_detected = False
-        self.__mode_button_long_detected = False
-
-        self.__tracking_state_machine_state = 0
-        self.__gripper_state_machine_state = 0
-        self.__mode_state_machine_state = 0
-        self.__control_mode = 'position'  # 'position', 'full' or 'velocity' or 'fixed'
-
-        self.__pose_tracking = False
-
-        # If the pose_tracking and control_mode are controlled through a service
-        # call. These conditions are tracked to prevent manual switch with
-        # buttons while in automatic mode.
-        self.__tracking_service_active = False
+        self.__pose_tracking  = False
         self.__allow_tracking = True
-        self.__control_mode_service_active = False
+        # 'position' | 'full' | 'velocity' | 'fixed_front' | 'fixed_top'
+        self.__control_mode   = 'position'
 
-        self.__open_gripper_position = 0.0
-        self.__close_gripper_position = 1.0
-        self.__gripper_mode = 'position'  # 'position' or 'force'
+        # ── Reference poses ───────────────────────────────────────────────────
+        # last_rik_pose  : EE pose in global base_link frame.
+        #                  Always maintained — used for floor-constraint Z comparison
+        #                  and publishing current_ee_pose.
+        # _local_rik_pose: EE pose in {robot_name}/base_link frame.
+        #                  Used by arm_local mode for compensation, jump-check, and
+        #                  publishing current_ee_pose_local.
+        self.last_rik_pose   = None   # global base_link
+        self._local_rik_pose = None   # {robot_name}/base_link
 
-        # Vecloti control variables:
-        self.__input_pose_neutral = None
-        self.__previous_time = None
-
-        self.__change_scaling = False
-
-        # # Public variables:
-        # Last commanded Relaxed IK pose is required to compensate controller
-        # input.
-        self.last_relaxed_ik_pose = None
-
-        # This difference is calculated each time the tracking is started and
-        # subracted from future inputs during current tracking to compensate for
-        # linear misalignment between the global and relaxed_ik coordinate
-        # systems.
-        self.input_relaxed_ik_difference = {
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+        # Compensation offset (diff = input − EE_ref at tracking start)
+        # Lives in the same frame as input_pose (either global or arm-local).
+        self.__diff = {
+            'position':    np.array([0., 0., 0.]),
+            'orientation': np.array([1., 0., 0., 0.]),
         }
 
-        # # Initialization and dependency status topics:
-        self.__is_initialized = False
-        self.__dependency_initialized = False
+        # Velocity mode state
+        self.__input_pose_neutral = None
+        self.__previous_time      = None
 
-        self.__node_is_initialized = rospy.Publisher(
-            f'/{self.ROBOT_NAME}/teleoperation/is_initialized',
-            Bool,
-            queue_size=1,
-        )
+        # Gripper config
+        self.__gripper_open_pos  = 0.0
+        self.__gripper_close_pos = 1.0
+        self.__gripper_mode      = 'force'   # 'force' | 'position'
 
-        self.__dependency_status = {}
-        self.__dependency_status_topics = {}
+        # ── Motion floor ──────────────────────────────────────────────────────
+        # Minimum EE height in global base_link Z (metres).
+        # When the EE is at or below this value, downward commands are suppressed
+        # (comp Z is held at the current EE Z) while tracking continues normally.
+        # Updated at runtime via /{robot_name}/teleoperation/floor_z.
+        self.__floor_z = float('-inf')
 
-        self.__dependency_status['chest_control'] = False
-        self.__dependency_status_topics['chest_control'] = (
-            rospy.Subscriber(
-                f'/chest_control/is_initialized',
-                Bool,
-                self.__chest_control_callback,
-            )
-        )
-        self.__dependency_status['joints_control'] = False
-        self.__dependency_status_topics['joints_control'] = (
-            rospy.Subscriber(
-                f'/{self.ROBOT_NAME}/joints_control/is_initialized',
-                Bool,
-                self.__joints_control_callback,
-            )
-        )
-        self.__dependency_status['gripper_control'] = False
-        self.__dependency_status_topics['gripper_control'] = (
-            rospy.Subscriber(
-                f'/{self.ROBOT_NAME}/gripper_control/is_initialized',
-                Bool,
-                self.__gripper_control_callback,
-            )
-        )
+        # Dependency tracking
+        self.__is_init  = False
+        self.__dep_init = False
+        self.__dep_status = {
+            'chest_control':  False,
+            'joints_control': False,
+            'gripper_control':False,
+        }
+        self.__dep_topics = {
+            'chest_control': rospy.Subscriber(
+                '/chest_control/is_initialized', Bool,
+                lambda m: self.__dep_cb('chest_control', m)),
+            'joints_control': rospy.Subscriber(
+                f'/{robot_name}/joints_control/is_initialized', Bool,
+                lambda m: self.__dep_cb('joints_control', m)),
+            'gripper_control': rospy.Subscriber(
+                f'/{robot_name}/gripper_control/is_initialized', Bool,
+                lambda m: self.__dep_cb('gripper_control', m)),
+        }
 
-        # # Service provider:
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/enable_tracking',
-            SetBool,
-            self.__enable_tracking_handler,
-        )
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/allow_tracking',
-            SetBool,
-            self.__allow_tracking_handler,
-        )
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/enable_full_mode',
-            SetBool,
-            self.__enable_full_mode_handler,
-        )
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/enable_velocity_mode',
-            SetBool,
-            self.__enable_velocity_mode_handler,
-        )
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/enable_fixed_orientation_mode',
-            SetBool,
-            self.__enable_fixed_orientation_handler,
-        )
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/set_change_scale',
-            Empty,
-            self.__set_change_scale_handler,
-        )
+        # ── Services provided ─────────────────────────────────────────────────
+        rospy.Service(f'/{robot_name}/teleoperation/start_tracking',
+                      Empty, self.__start_tracking_handler)
+        rospy.Service(f'/{robot_name}/teleoperation/stop_tracking',
+                      Empty, self.__stop_tracking_handler)
+        rospy.Service(f'/{robot_name}/teleoperation/gripper_toggle',
+                      SetBool, self.__gripper_toggle_handler)
+        rospy.Service(f'/{robot_name}/teleoperation/set_full_mode',
+                      SetBool, self.__set_full_mode_handler)
+        rospy.Service(f'/{robot_name}/teleoperation/allow_tracking',
+                      SetBool, self.__allow_tracking_handler)
+        rospy.Service(f'/{robot_name}/teleoperation/enable_velocity_mode',
+                      SetBool, self.__enable_velocity_mode_handler)
+        rospy.Service(f'/{robot_name}/teleoperation/enable_fixed_orientation_mode',
+                      SetBool, self.__enable_fixed_orientation_handler)
+        rospy.Service(f'/{robot_name}/teleoperation/pause_relaxed_ik',
+                      Empty, lambda _: (self.__pause_rik(), [])[1])
+        rospy.Service(f'/{robot_name}/teleoperation/resume_relaxed_ik',
+                      Empty, lambda _: (self.__resume_rik(), [])[1])
+        rospy.Service(f'/{robot_name}/teleoperation/reset_relaxed_ik',
+                      Empty, lambda _: (self.__reset_rik_full(), [])[1])
+        rospy.Service(f'/{robot_name}/teleoperation/gripper/set_open_position',
+                      GripperPosition, self.__set_open_handler)
+        rospy.Service(f'/{robot_name}/teleoperation/gripper/set_close_position',
+                      GripperPosition, self.__set_close_handler)
+        rospy.Service(f'/{robot_name}/teleoperation/gripper/enable_position_mode',
+                      SetBool, self.__gripper_mode_handler)
 
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/pause_relaxed_ik',
-            Empty,
-            self.__pause_relaxed_ik_handler,
-        )
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/resume_relaxed_ik',
-            Empty,
-            self.__resume_relaxed_ik_handler,
-        )
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/reset_relaxed_ik',
-            Empty,
-            self.__reset_relaxed_ik_handler,
-        )
+        # ── Service clients ───────────────────────────────────────────────────
+        self.__svc_grip_force = rospy.ServiceProxy(
+            f'/{robot_name}/gripper_control/force_grasping', GripperForceGrasping)
+        self.__svc_grip_pos   = rospy.ServiceProxy(
+            f'/{robot_name}/gripper_control/position', GripperPosition)
+        self.__svc_pid        = rospy.ServiceProxy(
+            f'/{robot_name}/joints_control/enable_pid', SetBool)
+        self.__svc_rik_reset  = rospy.ServiceProxy(
+            f'/{robot_name}/relaxed_ik/reset', Empty)
+        self.__svc_clear_faults = rospy.ServiceProxy(
+            f'/{robot_name}/base/clear_faults', Base_ClearFaults)
 
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/gripper/set_open_position',
-            GripperPosition,
-            self.__set_open_position_handler,
-        )
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/gripper/set_close_position',
-            GripperPosition,
-            self.__set_close_position_handler,
-        )
-        rospy.Service(
-            f'/{self.ROBOT_NAME}/teleoperation/gripper/enable_position_mode',
-            SetBool,
-            self.__enable_position_mode_handler,
-        )
+        # ── Publishers ────────────────────────────────────────────────────────
+        self.__pub_init         = rospy.Publisher(
+            f'/{robot_name}/teleoperation/is_initialized', Bool, queue_size=1)
+        self.__pub_rik          = rospy.Publisher(
+            f'/{robot_name}/relaxed_ik/ee_pose_goals', EEPoseGoals, queue_size=1)
+        self.__pub_is_tracking  = rospy.Publisher(
+            f'/{robot_name}/teleoperation/is_tracking', Bool, queue_size=1)
+        self.__pub_pos_only     = rospy.Publisher(
+            f'/{robot_name}/teleoperation/position_only', Bool, queue_size=1)
+        self.__pub_current_pose = rospy.Publisher(
+            f'/{robot_name}/teleoperation/current_ee_pose', Pose, queue_size=1)
+        self.__pub_current_pose_local = rospy.Publisher(
+            f'/{robot_name}/teleoperation/current_ee_pose_local', Pose, queue_size=1)
+        self.__pub_floor_z_eff = rospy.Publisher(
+            f'/{robot_name}/teleoperation/floor_z_input_space', Float64, queue_size=1)
 
-        # # Service subscriber:
-        self.__gripper_force_grasping = rospy.ServiceProxy(
-            f'/{self.ROBOT_NAME}/gripper_control/force_grasping',
-            GripperForceGrasping,
-        )
-        self.__gripper_position = rospy.ServiceProxy(
-            f'/{self.ROBOT_NAME}/gripper_control/position',
-            GripperPosition,
-        )
-        self.__enable_pid = rospy.ServiceProxy(
-            f'/{self.ROBOT_NAME}/joints_control/enable_pid',
-            SetBool,
-        )
-        self.__reset_rik = rospy.ServiceProxy(
-            f'/{self.ROBOT_NAME}/relaxed_ik/reset',
-            Empty,
-        )
-        self.__clear_arm_faults = rospy.ServiceProxy(
-            f'/{self.ROBOT_NAME}/base/clear_faults',
-            Base_ClearFaults,
-        )
-
-        # # Topic publisher:
-        self.__node_is_initialized = rospy.Publisher(
-            f'/{self.ROBOT_NAME}/teleoperation/is_initialized',
-            Bool,
-            queue_size=1,
-        )
-
-        self.__relaxed_ik_target = rospy.Publisher(
-            f'/{self.ROBOT_NAME}/relaxed_ik/ee_pose_goals',
-            EEPoseGoals,
-            queue_size=1,
-        )
-
-        self.__is_tracking = rospy.Publisher(
-            f'/{self.ROBOT_NAME}/teleoperation/is_tracking',
-            Bool,
-            queue_size=1,
-        )
-        self.__position_only = rospy.Publisher(
-            f'/{self.ROBOT_NAME}/teleoperation/position_only',
-            Bool,
-            queue_size=1,
-        )
-
-        # # Topic subscriber:
+        # ── Subscribers ───────────────────────────────────────────────────────
         rospy.Subscriber(
-            f'/{self.ROBOT_NAME}/teleoperation/input_pose',
-            Pose,
-            self.__input_pose_callback,
-        )
+            f'/{robot_name}/teleoperation/input_pose',
+            Pose, self.__input_pose_cb)
         rospy.Subscriber(
-            f'/{self.ROBOT_NAME}/teleoperation/tracking_button',
-            Bool,
-            self.__tracking_button_callback,
-        )
-        rospy.Subscriber(
-            f'/{self.ROBOT_NAME}/teleoperation/gripper_button',
-            Bool,
-            self.__gripper_button_callback,
-        )
-        rospy.Subscriber(
-            f'/{self.ROBOT_NAME}/teleoperation/mode_button',
-            Bool,
-            self.__mode_button_callback,
-        )
+            f'/{robot_name}/teleoperation/floor_z',
+            Float64, self.__floor_z_cb)
 
-        rospy.Subscriber(
-            f'/{self.ROBOT_NAME}/teleoperation/gripper_button_long',
-            Bool,
-            self.__gripper_button_long_callback,
-        )
-        rospy.Subscriber(
-            f'/{self.ROBOT_NAME}/teleoperation/mode_button_long',
-            Bool,
-            self.__mode_button_long_callback,
-        )
+        # ── TF ────────────────────────────────────────────────────────────────
+        self.__tf_buf = tf2_ros.Buffer(rospy.Duration(1))
+        tf2_ros.TransformListener(self.__tf_buf)
 
-        # # TF broadcaster:
+    # ─────────────────────────────────────────────────────────────────────────
+    # Reference pose helper
+    # ─────────────────────────────────────────────────────────────────────────
 
-        # # TF listener:
-        self.__tf_buffer = tf2_ros.Buffer(rospy.Duration(1))
-        tf2_ros.TransformListener(self.__tf_buffer)
+    @property
+    def _ref_pose(self):
+        """The EE reference pose in the SAME FRAME as input_pose.
 
-    # # Dependency status callbacks:
-    def __chest_control_callback(self, message):
-        """Monitors chest_control is_initialized topic.
-        
+        All compensation, jump-check, and mode computations must use this so
+        that frame-mixed arithmetic never occurs.
         """
+        if self.INPUT_POSE_FRAME == 'arm_local':
+            return self._local_rik_pose
+        return self.last_rik_pose
 
-        self.__dependency_status['chest_control'] = message.data
+    # ─────────────────────────────────────────────────────────────────────────
+    # Dependency callbacks
+    # ─────────────────────────────────────────────────────────────────────────
 
-    def __joints_control_callback(self, message):
-        """Monitors joints_control is_initialized topic.
-        
-        """
+    def __dep_cb(self, key, msg):
+        self.__dep_status[key] = msg.data
 
-        self.__dependency_status['joints_control'] = message.data
+    # ─────────────────────────────────────────────────────────────────────────
+    # Topic callbacks
+    # ─────────────────────────────────────────────────────────────────────────
 
-    def __gripper_control_callback(self, message):
-        """Monitors gripper_control is_initialized topic.
-        
-        """
+    def __input_pose_cb(self, msg):
+        self.__input_pose['position'][0] = msg.position.x
+        self.__input_pose['position'][1] = msg.position.y
+        self.__input_pose['position'][2] = msg.position.z
+        self.__input_pose['orientation'][0] = msg.orientation.w
+        self.__input_pose['orientation'][1] = msg.orientation.x
+        self.__input_pose['orientation'][2] = msg.orientation.y
+        self.__input_pose['orientation'][3] = msg.orientation.z
 
-        self.__dependency_status['gripper_control'] = message.data
+    def __floor_z_cb(self, msg):
+        """Update the minimum allowed EE height (global base_link Z) at runtime."""
+        self.__floor_z = float(msg.data)
+        rospy.loginfo_throttle(
+            5.0,
+            f'/{self.ROBOT_NAME}/teleoperation: floor_z → {self.__floor_z:.3f} m')
 
-    # # Service handlers:
-    def __enable_tracking_handler(self, request):
-        """
-        
-        """
+    # ─────────────────────────────────────────────────────────────────────────
+    # Service handlers
+    # ─────────────────────────────────────────────────────────────────────────
 
-        message = ''
-        success = False
-
-        if not self.__is_initialized:
-            return success, message
-
-        if request.data:
-            self.__tracking_service_active = True
-
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    'pose_tracking was enabled by a service call.\n'
-                    'Button pose_tracking is now disabled.\n'
-                ),
-            )
-
+    def __start_tracking_handler(self, _):
+        if self.__is_init and self.__allow_tracking:
             self.__calculate_compensation()
             self.__pose_tracking = True
-            self.__tracking_state_machine_state = 0
+            rospy.loginfo(f'/{self.ROBOT_NAME}/teleoperation: tracking STARTED')
+        return []
 
-            message = 'pose_tracking was enabled.'
-            success = True
+    def __stop_tracking_handler(self, _):
+        self.__pose_tracking = False
+        if self.__is_init:
+            try:
+                self.__svc_rik_reset()
+            except Exception as ex:
+                rospy.logwarn(f'/{self.ROBOT_NAME}/teleoperation: rik reset on stop: {ex}')
+        rospy.loginfo(f'/{self.ROBOT_NAME}/teleoperation: tracking STOPPED')
+        return []
 
-        elif not request.data:
+    def __gripper_toggle_handler(self, req):
+        if not self.__is_init:
+            return False, 'not initialized'
+        if req.data:
+            if self.__gripper_mode == 'force':
+                self.__svc_grip_force(0.0)
+            else:
+                self.__svc_grip_pos(self.__gripper_close_pos)
+            return True, 'gripper closed'
+        else:
+            self.__svc_grip_pos(self.__gripper_open_pos)
+            return True, 'gripper opened'
+
+    def __set_full_mode_handler(self, req):
+        if not self.__is_init:
+            return False, 'not initialized'
+        self.__control_mode = 'full' if req.data else 'position'
+        if req.data:
+            self.__calculate_compensation()
+        mode_str = 'full' if req.data else 'position'
+        rospy.loginfo(f'/{self.ROBOT_NAME}/teleoperation: mode = {mode_str}')
+        return True, mode_str
+
+    def __allow_tracking_handler(self, req):
+        self.__allow_tracking = req.data
+        if not req.data and self.__pose_tracking:
             self.__pose_tracking = False
-            self.__tracking_service_active = False
-            self.__tracking_state_machine_state = 0
+            try:
+                self.__svc_rik_reset()
+            except Exception as ex:
+                rospy.logwarn(f'/{self.ROBOT_NAME}/teleoperation: rik reset on disallow: {ex}')
+        state = 'allowed' if req.data else 'disallowed'
+        rospy.logwarn(f'/{self.ROBOT_NAME}/teleoperation: tracking {state}')
+        return True, state
 
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    'pose_tracking was disabled by a service call.\n'
-                    'Button pose_tracking is now enabled.\n'
-                ),
-            )
-
-            self.__reset_rik()
-            message = 'pose_tracking was disabled.'
-            success = True
-
-        return success, message
-
-    def __allow_tracking_handler(self, request):
-        """
-        
-        """
-
-        message = ''
-        success = False
-
-        if not self.__is_initialized:
-            return success, message
-
-        if request.data:
-            self.__allow_tracking = True
-
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    'tracking is allowed.\n'
-                ),
-            )
-
-            message = 'tracking is allowed'
-            success = True
-
-        elif not request.data:
-            self.__allow_tracking = False
-
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    'tracking is not allowed.\n'
-                ),
-            )
-
-            message = 'tracking is not allowed'
-            success = True
-
-        return success, message
-
-    def __enable_full_mode_handler(self, request):
-        """
-        
-        """
-
-        message = ''
-        success = False
-
-        if not self.__is_initialized:
-            return success, message
-
-        if request.data and not self.__control_mode_service_active:
-            self.__control_mode_service_active = True
-
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    'control_mode was set to "full" by a service call.\n'
-                    'Button control_mode change is now disabled.\n'
-                ),
-            )
-
-            self.__control_mode = 'full'
+    def __enable_velocity_mode_handler(self, req):
+        self.__control_mode = 'velocity' if req.data else 'position'
+        if req.data and self.__pose_tracking:
             self.__calculate_compensation()
-            self.__mode_state_machine_state = 0
-
-            message = 'Full (position + orientation) mode.'
-            success = True
-
-        elif not request.data and self.__control_mode_service_active:
-            self.__control_mode = 'position'
-            self.__control_mode_service_active = False
-
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    'control_mode was set to "position" by a service call.\n'
-                    'Button control_mode change is now enabled.\n'
-                ),
-            )
-
-            message = 'Position only mode.'
-            success = True
-
-        return success, message
-
-    def __set_change_scale_handler(self, request):
-        """
-        
-        """
-
-        self.__change_scaling = True
-
-        return []
-
-    def __pause_relaxed_ik_handler(self, request):
-        """
-
-        """
-
-        self.__pause_relaxed_ik()
-
-        return []
-
-    def __resume_relaxed_ik_handler(self, request):
-        """
-
-        """
-
-        self.__resume_relaxed_ik()
-
-        return []
-
-    def __reset_relaxed_ik_handler(self, request):
-        """
-
-        """
-
-        self.__reset_relaxed_ik()
-
-        return []
-
-    def __set_open_position_handler(self, request: GripperPosition):
-        """Sets open gripper position variable.
-
-        """
-
-        self.__open_gripper_position = np.clip(
-            request.position,
-            0.0,
-            1.0,
-        )
-
-        return True
-
-    def __set_close_position_handler(self, request: GripperPosition):
-        """Sets close gripper position variable.
-
-        """
-
-        self.__close_gripper_position = np.clip(
-            request.position,
-            0.0,
-            1.0,
-        )
-
-        return True
-
-    def __enable_position_mode_handler(self, request: SetBool):
-        """Enables position mode.
-
-        """
-        if request.data:
-            self.__gripper_mode = 'position'
-            message = 'Gripper POSITION mode.'
-
-        else:
-            self.__gripper_mode = 'force'
-            message = 'Gripper FORCE mode.'
-
-        success = True
-
-        return success, message
-
-    def __enable_velocity_mode_handler(self, request: SetBool):
-        """Enables velocity mode.
-
-        """
-        if request.data:
-            self.__control_mode = 'velocity'
-
-        else:
-            self.__control_mode = 'position'
-
-        if self.__is_tracking:
-            self.__calculate_compensation()
-
-        success = True
-        message = ''
-
         rospy.logwarn(
-            (
-                f'/{self.ROBOT_NAME}/teleoperation: '
-                f'control_mode was changed to {self.__control_mode} by a service call.\n'
-            ),
-        )
+            f'/{self.ROBOT_NAME}/teleoperation: '
+            f'control_mode → {self.__control_mode} (velocity mode service)')
+        return True, self.__control_mode
 
-        return success, message
-
-    def __enable_fixed_orientation_handler(self, request: SetBool):
-        """
-        
-        """
-
-        if request.data:
-            self.__control_mode = rospy.get_param(
-                f'/{self.ROBOT_NAME}/teleoperation/fixed_mode'
-            )
-
+    def __enable_fixed_orientation_handler(self, req):
+        if req.data:
+            try:
+                self.__control_mode = rospy.get_param(
+                    f'/{self.ROBOT_NAME}/teleoperation/fixed_mode')
+            except KeyError:
+                rospy.logwarn(
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    f'fixed_mode param not set, defaulting to fixed_front')
+                self.__control_mode = 'fixed_front'
         else:
             self.__control_mode = 'position'
-
-        if self.__is_tracking:
+        if self.__pose_tracking:
             try:
                 self.__calculate_compensation()
-            except Exception as e:
+            except Exception as ex:
                 rospy.logerr(
-                    (
-                        f'/{self.ROBOT_NAME}/teleoperation: '
-                        f'Failed to calculate compensation: {e}'
-                    ),
-                )
-                self.__stop_tracking()
-                self.__enable_pid(True)
-                self.__clear_arm_faults()
-
-        success = True
-        message = ''
-
+                    f'/{self.ROBOT_NAME}/teleoperation: '
+                    f'compensation failed after mode change: {ex}')
+                self.__stop_tracking_internal()
         rospy.logwarn(
-            (
-                f'/{self.ROBOT_NAME}/teleoperation: '
-                f'control_mode was changed to {self.__control_mode} by a service call.\n'
-            ),
-        )
+            f'/{self.ROBOT_NAME}/teleoperation: '
+            f'control_mode → {self.__control_mode} (fixed orientation service)')
+        return True, self.__control_mode
 
-        return success, message
+    def __set_open_handler(self, req):
+        self.__gripper_open_pos = float(np.clip(req.position, 0., 1.))
+        return True
 
-    # # Topic callbacks:
-    def __input_pose_callback(self, message):
-        """
+    def __set_close_handler(self, req):
+        self.__gripper_close_pos = float(np.clip(req.position, 0., 1.))
+        return True
 
-        """
+    def __gripper_mode_handler(self, req):
+        self.__gripper_mode = 'position' if req.data else 'force'
+        return True, self.__gripper_mode
 
-        self.__input_pose['position'][0] = message.position.x
-        self.__input_pose['position'][1] = message.position.y
-        self.__input_pose['position'][2] = message.position.z
+    # ─────────────────────────────────────────────────────────────────────────
+    # Private methods
+    # ─────────────────────────────────────────────────────────────────────────
 
-        self.__input_pose['orientation'][0] = message.orientation.w
-        self.__input_pose['orientation'][1] = message.orientation.x
-        self.__input_pose['orientation'][2] = message.orientation.y
-        self.__input_pose['orientation'][3] = message.orientation.z
-
-    def __tracking_button_callback(self, message):
-        """
-
-        """
-
-        self.__tracking_button = message.data
-
-    def __gripper_button_callback(self, message):
-        """
-
-        """
-
-        self.__gripper_button = message.data
-
-    def __mode_button_callback(self, message):
-        """
-
-        """
-
-        self.__mode_button = message.data
-
-    def __gripper_button_long_callback(self, message):
-        """
-
-        """
-
-        if message.data:
-            self.__gripper_button_long_detected = True
-
-    def __mode_button_long_callback(self, message):
-        """
-
-        """
-
-        if message.data:
-            self.__mode_button_long_detected = True
-
-    # # Private methods:
     def __check_initialization(self):
-        """Monitors required criteria and sets is_initialized variable.
-
-        Monitors nodes' dependency status by checking if dependency's
-        is_initialized topic has at most one publisher (this ensures that
-        dependency node is alive and does not have any duplicates) and that it
-        publishes True. If dependency's status was True, but get_num_connections
-        is not equal to 1, this means that the connection is lost and emergency
-        actions should be performed.
-
-        Once all dependencies are initialized and additional criteria met, the
-        nodes is_initialized status changes to True. This status can change to
-        False any time to False if some criteria are no longer met.
-        
-        """
-
-        self.__dependency_initialized = True
-
-        for key in self.__dependency_status:
-            if self.__dependency_status_topics[key].get_num_connections() != 1:
-                if self.__dependency_status[key]:
+        self.__dep_init = True
+        for key in self.__dep_status:
+            if self.__dep_topics[key].get_num_connections() != 1:
+                if self.__dep_status[key]:
                     rospy.logerr(
-                        (
-                            f'/{self.ROBOT_NAME}/teleoperation: '
-                            f'lost connection to {key}!'
-                        )
-                    )
+                        f'/{self.ROBOT_NAME}/teleoperation: '
+                        f'lost connection to {key}!')
+                self.__dep_status[key] = False
+            if not self.__dep_status[key]:
+                self.__dep_init = False
 
-                    # # Emergency actions on lost connection:
-                    # NOTE (optionally): Add code, which needs to be executed if
-                    # connection to any of dependencies was lost.
-
-                self.__dependency_status[key] = False
-
-            if not self.__dependency_status[key]:
-                self.__dependency_initialized = False
-
-        if not self.__dependency_initialized:
-            waiting_for = ''
-            for key in self.__dependency_status:
-                if not self.__dependency_status[key]:
-                    waiting_for += f'\n- waiting for {key}...'
-
+        if not self.__dep_init:
+            waiting = ''.join(
+                f'\n- waiting for {k}...'
+                for k, v in self.__dep_status.items() if not v)
             rospy.logwarn_throttle(
-                15,
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation:'
-                    f'{waiting_for}'
-                    # f'\nMake sure those dependencies are running properly!'
-                ),
-            )
+                15, f'/{self.ROBOT_NAME}/teleoperation:{waiting}')
 
-        if self.__dependency_status['chest_control']:
-            self.__get_relaxed_ik_last_pose()
+        if self.__dep_status['chest_control']:
+            self.__update_rik_pose()
 
-        # NOTE: Add more initialization criterea if needed.
-        if (
-            self.__dependency_initialized and self.last_relaxed_ik_pose != None
-        ):
-            if not self.__is_initialized:
+        if self.__dep_init and self._ref_pose is not None:
+            if not self.__is_init:
                 rospy.loginfo(
-                    f'\033[92m/{self.ROBOT_NAME}/teleoperation: ready.\033[0m',
-                )
-
-                self.__is_initialized = True
-
+                    f'\033[92m/{self.ROBOT_NAME}/teleoperation: ready.\033[0m')
+                self.__is_init = True
         else:
-            if self.__is_initialized:
-                # NOTE (optionally): Add code, which needs to be executed if the
-                # nodes's status changes from True to False.
-
-                # Stop tracking.
-                self.__tracking_state_machine_state = 0
+            if self.__is_init:
                 self.__pose_tracking = False
+            self.__is_init = False
 
-            self.__is_initialized = False
+        self.__pub_init.publish(self.__is_init)
 
-        self.__node_is_initialized.publish(self.__is_initialized)
+    def __update_rik_pose(self):
+        """Read the current relaxed-IK target from TF (only when not tracking).
 
-    def __tracking_state_machine(self):
+        Maintains both last_rik_pose (global base_link) and _local_rik_pose
+        ({robot_name}/base_link) so callers can always use _ref_pose regardless
+        of input_pose_frame without risking frame-mixed arithmetic.
         """
-        
-        """
-
-        # Do not allow manual tracking control while the tracking is controlled
-        # using the service.
-        if self.__tracking_service_active:
+        if self.__pose_tracking:
             return
 
-        # State 0: Grip button was pressed.
-        if (
-            self.__tracking_state_machine_state == 0 and self.__tracking_button
-        ):
+        # ── Global pose (base_link) ───────────────────────────────────────────
+        try:
+            tf = self.__tf_buf.lookup_transform(
+                'base_link',
+                f'{self.ROBOT_NAME}/relaxed_ik_target',
+                rospy.Time(0))
+            t = tf.transform.translation
+            r = tf.transform.rotation
+            self.last_rik_pose = {
+                'position':    np.array([t.x, t.y, t.z]),
+                'orientation': np.array([r.w, r.x, r.y, r.z]),
+            }
+        except Exception:
+            pass
 
-            self.__tracking_state_machine_state = 1
-
-            if self.TRACKING_MODE == 'hold':
-                self.__calculate_compensation()
-                self.__pose_tracking = True
-
-        # State 1: Grip button was released. Tracking is activated.
-        elif (
-            self.__tracking_state_machine_state == 1
-            and not self.__tracking_button
-        ):
-
-            if self.TRACKING_MODE == 'toggle':
-                self.__tracking_state_machine_state = 2
-                self.__calculate_compensation()
-                self.__pose_tracking = True
-
-            elif self.TRACKING_MODE == 'hold':
-                self.__tracking_state_machine_state = 0
-                self.__pose_tracking = False
-
-        # State 2: Grip button was pressed. Tracking is deactivated.
-        elif (
-            self.__tracking_state_machine_state == 2 and self.__tracking_button
-        ):
-
-            self.__tracking_state_machine_state = 3
-            self.__pose_tracking = False
-            # self.__change_scaling = False
-
-            self.__reset_rik()
-
-        # State 3: Grip button was released.
-        elif (
-            self.__tracking_state_machine_state == 3
-            and not self.__tracking_button
-        ):
-
-            self.__tracking_state_machine_state = 0
-
-    def __mode_state_machine(self):
-        """
-        
-        """
-
-        # Do not allow manual mode control while the mode is controlled
-        # using the service.
-        if self.__control_mode_service_active:
-            return
-
-        # State 0: Button was pressed.
-        if (self.__mode_state_machine_state == 0 and self.__mode_button):
-
-            self.__mode_state_machine_state = 1
-
-        # State 1: Button was released.
-        elif (self.__mode_state_machine_state == 1 and not self.__mode_button):
-            if self.__mode_button_long_detected:
-                self.__mode_state_machine_state = 0
-                self.__mode_button_long_detected = False
-                return
-
-            self.__mode_state_machine_state = 2
-            self.__control_mode = 'full'
-            self.__calculate_compensation()
-
-        # State 2: Button was pressed.
-        elif (self.__mode_state_machine_state == 2 and self.__mode_button):
-
-            self.__mode_state_machine_state = 3
-
-        # State 3: Button was released.
-        elif (self.__mode_state_machine_state == 3 and not self.__mode_button):
-            if self.__mode_button_long_detected:
-                self.__mode_state_machine_state = 2
-                self.__mode_button_long_detected = False
-                return
-
-            self.__mode_state_machine_state = 0
-            self.__control_mode = 'position'
-
-    def __gripper_state_machine(self):
-        """
-        
-        """
-
-        # State 0: Button was pressed.
-        if (self.__gripper_state_machine_state == 0 and self.__gripper_button):
-
-            self.__gripper_state_machine_state = 1
-
-        # State 1: Button was released. Force grasping is activated.
-        elif (
-            self.__gripper_state_machine_state == 1
-            and not self.__gripper_button
-        ):
-            if self.__gripper_button_long_detected:
-                self.__gripper_state_machine_state = 0
-                self.__gripper_button_long_detected = False
-                return
-
-            if self.__gripper_mode == 'force':
-                self.__gripper_force_grasping(0.0)  # 0.0 for default current.
-            else:
-                self.__gripper_position(
-                    self.__close_gripper_position
-                )  # 1.0 for close position.
-
-            self.__gripper_state_machine_state = 2
-
-        # State 2: Button was pressed. Open the gripper.
-        elif (
-            self.__gripper_state_machine_state == 2 and self.__gripper_button
-        ):
-
-            self.__gripper_state_machine_state = 3
-
-        # State 3: Button was released.
-        elif (
-            self.__gripper_state_machine_state == 3
-            and not self.__gripper_button
-        ):
-            if self.__gripper_button_long_detected:
-                self.__gripper_state_machine_state = 2
-                self.__gripper_button_long_detected = False
-                return
-
-            self.__gripper_position(
-                self.__open_gripper_position
-            )  # 0.0 for open position.
-            self.__gripper_state_machine_state = 0
+        # ── Arm-local pose ({robot_name}/base_link) ───────────────────────────
+        try:
+            tf_l = self.__tf_buf.lookup_transform(
+                f'{self.ROBOT_NAME}/base_link',
+                f'{self.ROBOT_NAME}/relaxed_ik_target',
+                rospy.Time(0))
+            tl = tf_l.transform.translation
+            rl = tf_l.transform.rotation
+            self._local_rik_pose = {
+                'position':    np.array([tl.x, tl.y, tl.z]),
+                'orientation': np.array([rl.w, rl.x, rl.y, rl.z]),
+            }
+        except Exception:
+            pass
 
     def __calculate_compensation(self):
-        """Calculates the compensation for coordinate systems misalignment.
-        
+        """Compute the offset between input_pose and current EE pose.
+
+        Both quantities are expressed in the same frame (determined by
+        INPUT_POSE_FRAME), so the subtraction is always frame-consistent.
         """
+        ref = self._ref_pose
+        if ref is None:
+            return
 
         if self.__control_mode == 'velocity':
             self.__input_pose_neutral = deepcopy(self.__input_pose)
             self.__previous_time = rospy.Time.now()
-
             return
 
-        self.input_relaxed_ik_difference['position'] = (
-            self.__input_pose['position']
-            - self.last_relaxed_ik_pose['position']
-        )
+        self.__diff['position'] = (
+            self.__input_pose['position'] - ref['position'])
+        self.__diff['orientation'] = transformations.quaternion_multiply(
+            transformations.quaternion_inverse(self.__input_pose['orientation']),
+            ref['orientation'])
 
-        self.input_relaxed_ik_difference['orientation'] = (
-            transformations.quaternion_multiply(
-                transformations.quaternion_inverse(
-                    self.__input_pose['orientation']
-                ),
-                self.last_relaxed_ik_pose['orientation'],
-            )
-        )
-
-    def __stop_tracking(self):
-        """
-        
-        """
-
-        if self.__tracking_service_active:
-            self.__tracking_service_active = False
-
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    'tracking service is now not active.\n'
-                    'Button pose_tracking is now enabled.\n'
-                ),
-            )
-
-        # Deactivate control mode service:
-        if self.__control_mode_service_active:
-            self.__control_mode_service_active = False
-
-            rospy.logwarn(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    'control_mode service is now not active.\n'
-                    'Button control_mode change is now enabled.'
-                    f'Current control_mode is {self.__control_mode}\n'
-                ),
-            )
-
+    def __stop_tracking_internal(self):
+        """Internal stop — does not call back into service handlers."""
         self.__pose_tracking = False
-        # self.__change_scaling = False
-        self.__tracking_state_machine_state = 0
-        self.__reset_rik()
+        try:
+            self.__svc_rik_reset()
+        except Exception as ex:
+            rospy.logwarn(f'/{self.ROBOT_NAME}/teleoperation: rik reset: {ex}')
+
+    def __pause_rik(self):
+        try:
+            self.__svc_pid(False)
+        except Exception as ex:
+            rospy.logwarn(f'/{self.ROBOT_NAME}/teleoperation: pause_rik: {ex}')
+
+    def __resume_rik(self):
+        try:
+            self.__svc_rik_reset()
+            self.__svc_pid(True)
+        except Exception as ex:
+            rospy.logwarn(f'/{self.ROBOT_NAME}/teleoperation: resume_rik: {ex}')
+
+    def __reset_rik_full(self):
+        self.__pause_rik()
+        try:
+            self.__svc_clear_faults()
+        except Exception as ex:
+            rospy.logwarn(f'/{self.ROBOT_NAME}/teleoperation: clear_faults: {ex}')
+        self.__resume_rik()
+
+    def __publish_current_pose(self):
+        """Publish EE pose in global base_link frame."""
+        if self.last_rik_pose is None:
+            return
+        msg = Pose()
+        p, q = self.last_rik_pose['position'], self.last_rik_pose['orientation']
+        msg.position.x = float(p[0]); msg.position.y = float(p[1]); msg.position.z = float(p[2])
+        msg.orientation.w = float(q[0]); msg.orientation.x = float(q[1])
+        msg.orientation.y = float(q[2]); msg.orientation.z = float(q[3])
+        self.__pub_current_pose.publish(msg)
+
+    def __publish_current_pose_local(self):
+        """Publish EE pose in {robot_name}/base_link frame.
+
+        Joystick-mapping integrators seed from this topic so that accumulated
+        positions stay in the arm's own frame, eliminating axis cross-talk that
+        would otherwise arise when the TF rotation between frames mixes axes.
+        """
+        if self._local_rik_pose is None:
+            return
+        msg = Pose()
+        p, q = self._local_rik_pose['position'], self._local_rik_pose['orientation']
+        msg.position.x = float(p[0]); msg.position.y = float(p[1]); msg.position.z = float(p[2])
+        msg.orientation.w = float(q[0]); msg.orientation.x = float(q[1])
+        msg.orientation.y = float(q[2]); msg.orientation.z = float(q[3])
+        self.__pub_current_pose_local.publish(msg)
+
+    def __publish_floor_z_effective(self):
+        """Publish the floor Z threshold translated into input_pose Z space.
+
+        Pose-mapping clients subscribe to this topic and clamp their raw
+        controller Z to the published value.  This prevents the 'goal' (the
+        input_pose being published by the mapping) from drifting below the
+        floor while teleoperation.py's constraint holds the arm at the floor —
+        eliminating the dead-zone the user would otherwise have to travel back
+        through before the arm responds to upward motion again.
+
+        The relationship is:
+            floor_z_input_space = floor_z + diff.z
+        because:
+            comp.z = input_pose.z - diff.z
+            comp.z >= floor_z  ⟺  input_pose.z >= floor_z + diff.z
+
+        Published as -inf when:
+          • floor is disabled (floor_z == -inf)
+          • not currently tracking (diff is stale / meaningless)
+          • velocity mode (diff.z is not a position offset in velocity mode)
+        In those states max(raw_z, -inf) == raw_z, so the mapping is a no-op.
+        """
+        if (self.__floor_z <= float('-inf')
+                or not self.__pose_tracking
+                or self.__control_mode == 'velocity'):
+            eff = float('-inf')
+        else:
+            eff = self.__floor_z + float(self.__diff['position'][2])
+        msg = Float64()
+        msg.data = eff
+        self.__pub_floor_z_eff.publish(msg)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Floor constraint helper
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def __apply_floor_constraint(self, comp):
+        """Suppress downward motion when the EE is at or below floor_z.
+
+        floor_z is always measured in global base_link Z.  When the constraint
+        activates, the Z component of the commanded position is held at the
+        current EE Z so the arm cannot move further downward — but it CAN move
+        upward freely, and horizontal motion is unaffected.  Tracking is never
+        interrupted.
+
+        Works in both input_pose_frame modes:
+          base_link  — comp['position'][2] is global Z; clamp directly.
+          arm_local  — comp['position'][2] is arm-local Z; compare commanded
+                       arm-local Z delta against a threshold derived from the
+                       current global EE Z.  If global Z is at/below the floor
+                       and the arm-local command would move it lower, freeze the
+                       arm-local Z at the current value.
+
+        Returns True if the constraint was active this tick (for logging).
+        """
+        if self.__floor_z <= float('-inf'):
+            return False
+
+        if self.INPUT_POSE_FRAME == 'arm_local':
+            if self._local_rik_pose is None or self.last_rik_pose is None:
+                return False
+
+            # Global Z of the current EE (last known)
+            current_global_z = self.last_rik_pose['position'][2]
+            # Only engage when the EE is at or below the floor in global frame
+            if current_global_z > self.__floor_z:
+                return False
+
+            # Commanded arm-local Z vs current arm-local Z
+            commanded_local_z = comp['position'][2]
+            current_local_z   = self._local_rik_pose['position'][2]
+
+            if commanded_local_z < current_local_z:
+                # Command would push the arm-local Z lower → suppress it
+                comp['position'][2] = current_local_z
+                return True
+
+        else:
+            # base_link mode: comp['position'][2] IS the commanded global Z
+            if comp['position'][2] < self.__floor_z:
+                comp['position'][2] = self.__floor_z
+                return True
+
+        return False
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Main pose computation
+    # ─────────────────────────────────────────────────────────────────────────
 
     def __publish_kinova_pose(self):
+        """Compute compensated pose and send to relaxed-IK.
+
+        Frame consistency
+        ~~~~~~~~~~~~~~~~~
+        All maths (compensation, mode computations, jump check) use _ref_pose,
+        which lives in the same frame as input_pose (global base_link when
+        INPUT_POSE_FRAME=='base_link', arm-local when 'arm_local').  This
+        eliminates the frame-mixed subtraction bug that was present when
+        last_rik_pose (global) was used directly in arm_local mode.
+
+        Floor constraint
+        ~~~~~~~~~~~~~~~~
+        After computing comp, __apply_floor_constraint() suppresses any
+        downward Z component when the EE is at or below floor_z (global Z).
+        The constraint never stops tracking; it simply freezes the Z command.
+
+        Publishing
+        ~~~~~~~~~~
+        base_link mode: comp is in global frame → TF-transform to arm-local → publish.
+        arm_local mode: comp is already in arm-local frame → publish directly.
+        In both cases, both last_rik_pose (global) and _local_rik_pose are kept
+        in sync with our own commands for the next-tick jump check and floor check.
         """
-        
-        """
-
-        # Protection against 0, 0, 0 controller input values.
-        # Controller loses connection, goes into a sleep mode etc.
-        if (
-            self.__input_pose['position'][0] == 0
-            and self.__input_pose['position'][1] == 0
-            and self.__input_pose['position'][2] == 0 and self.__pose_tracking
-        ):
-            self.__stop_tracking()
-
-            rospy.logerr(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    f'\n(0, 0, 0) position while active tracking! '
-                    '\nStopped input tracking.'
-                ),
-            )
-
+        ref = self._ref_pose
+        if ref is None:
             return
 
-        compensated_input_pose = {
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([1.0, 0.0, 0.0, 0.0]),
+        comp = {
+            'position':    np.array([0., 0., 0.]),
+            'orientation': np.array([1., 0., 0., 0.]),
         }
 
-        if self.__control_mode != 'velocity':
-            compensated_input_pose['position'] = (
-                self.__input_pose['position']
-                - self.input_relaxed_ik_difference['position']
-            )
-
-            # Use fixed (last commanded) orientation.
-            compensated_input_pose['orientation'] = (
-                self.last_relaxed_ik_pose['orientation']
-            )
-
-            # Fixed orientation:
-            if self.__control_mode == 'fixed_front':
-                compensated_input_pose['orientation'] = np.array(
-                    [0.5, 0.5, 0.5, 0.5]
-                )
-
-            elif self.__control_mode == 'fixed_top':
-                compensated_input_pose['orientation'] = np.array(
-                    [0.0, -0.707, -0.707, 0.0]
-                )
-
-        # Velocity control mode is limited to position only.
-        elif self.__control_mode == 'velocity':
+        # ── Velocity mode ────────────────────────────────────────────────────
+        if self.__control_mode == 'velocity':
             scale = 2
-
-            velocity_vector = self.__velocity_from_deviation(
+            vel = self.__velocity_from_deviation(
                 current=self.__input_pose['position'],
                 setpoint=self.__input_pose_neutral['position'],
                 axis_scale=np.array([scale, scale, scale]),
                 dead_zone_radius=0.01,
             )
-
-            target_x = (
-                self.last_relaxed_ik_pose['position'][0] + velocity_vector[0] *
-                (rospy.Time.now() - self.__previous_time).to_sec()
-            )
-            target_y = (
-                self.last_relaxed_ik_pose['position'][1] + velocity_vector[1] *
-                (rospy.Time.now() - self.__previous_time).to_sec()
-            )
-            target_z = (
-                self.last_relaxed_ik_pose['position'][2] + velocity_vector[2] *
-                (rospy.Time.now() - self.__previous_time).to_sec()
-            )
-
-            compensated_input_pose['position'] = np.array(
-                [
-                    target_x,
-                    target_y,
-                    target_z,
-                ]
-            )
-            # Fixed orientation.
-            compensated_input_pose['orientation'] = np.array(
-                [0.5, 0.5, 0.5, 0.5]
-            )
-
+            dt = (rospy.Time.now() - self.__previous_time).to_sec()
+            comp['position'] = ref['position'] + vel * dt
             self.__previous_time = rospy.Time.now()
+            comp['orientation'] = np.array([0.5, 0.5, 0.5, 0.5])
 
-            # rospy.loginfo_throttle(
-            #     1,
-            #     (
-            #         f'/{self.ROBOT_NAME}/teleoperation:'
-            #         f'x: {np.round(velocity_vector[0], 3)}, y: {np.round(velocity_vector[1], 3)}, z: {np.round(velocity_vector[2], 3)}'
-            #         f'\nCompensated input pose: {np.round(compensated_input_pose["position"], 3)}'
-            #     ),
-            # )
-            # return
+        # ── Fixed orientation modes ──────────────────────────────────────────
+        elif self.__control_mode == 'fixed_front':
+            comp['position']    = self.__input_pose['position'] - self.__diff['position']
+            comp['orientation'] = np.array([0.5, 0.5, 0.5, 0.5])
 
-        elif self.__control_mode in ['fixed_front', 'fixed_top']:
-            # Use fixed (last commanded) orientation.
-            compensated_input_pose['orientation'] = (
-                self.last_relaxed_ik_pose['orientation']
-            )
+        elif self.__control_mode == 'fixed_top':
+            comp['position']    = self.__input_pose['position'] - self.__diff['position']
+            comp['orientation'] = np.array([0., -0.707, -0.707, 0.])
 
-        # Use oculus orientation.
-        if self.__control_mode == 'full':
-            compensated_input_pose['orientation'] = (
-                self.__input_pose['orientation']
-            )
+        # ── Position-only mode ───────────────────────────────────────────────
+        elif self.__control_mode == 'position':
+            comp['position']    = self.__input_pose['position'] - self.__diff['position']
+            comp['orientation'] = ref['orientation']
 
+        # ── Full (position + orientation) mode ───────────────────────────────
+        elif self.__control_mode == 'full':
+            comp['position'] = self.__input_pose['position'] - self.__diff['position']
             if self.COMPENSATE_ORIENTATION:
-                compensated_input_pose['orientation'] = (
-                    transformations.quaternion_multiply(
-                        self.__input_pose['orientation'],
-                        self.input_relaxed_ik_difference['orientation'],
-                    )
-                )
-
+                comp['orientation'] = transformations.quaternion_multiply(
+                    self.__input_pose['orientation'],
+                    self.__diff['orientation'])
             else:
-                # # Convenience orientation corrections:
-                compensated_input_pose['orientation'] = (
-                    transformations.quaternion_multiply(
-                        compensated_input_pose['orientation'],
-                        transformations.quaternion_about_axis(
-                            np.deg2rad(self.CONVENIENCE_COMPENSATION[1]),
-                            (0, 1, 0),  # Around Y.
-                        ),
-                    )
-                )
-                compensated_input_pose['orientation'] = (
-                    transformations.quaternion_multiply(
-                        compensated_input_pose['orientation'],
-                        transformations.quaternion_about_axis(
-                            np.deg2rad(self.CONVENIENCE_COMPENSATION[2]),
-                            (0, 0, 1),  # Around Z.
-                        ),
-                    )
-                )
-                compensated_input_pose['orientation'] = (
-                    transformations.quaternion_multiply(
-                        compensated_input_pose['orientation'],
-                        transformations.quaternion_about_axis(
-                            np.deg2rad(self.CONVENIENCE_COMPENSATION[0]),
-                            (1, 0, 0),  # Around X.
-                        ),
-                    )
-                )
+                q = self.__input_pose['orientation'].copy()
+                for deg, axis in zip(self.CONVENIENCE_COMPENSATION,
+                                     [(1,0,0), (0,1,0), (0,0,1)]):
+                    q = transformations.quaternion_multiply(
+                        q, transformations.quaternion_about_axis(
+                            np.deg2rad(deg), axis))
+                comp['orientation'] = q
 
-        # Protection against too big positional input changes. Controller loses
-        # connection, goes out-of-sight, goes into a sleep mode, user input is
-        # unsafe.
-        input_position_difference = np.linalg.norm(
-            compensated_input_pose['position']
-            - self.last_relaxed_ik_pose['position']
-        )
+        # ── Motion floor constraint ───────────────────────────────────────────
+        # Applied before the jump check so that holding Z at the floor never
+        # triggers a spurious large-jump stop.
+        floor_active = self.__apply_floor_constraint(comp)
+        if floor_active:
+            rospy.logwarn_throttle(
+                1.0,
+                f'/{self.ROBOT_NAME}/teleoperation: '
+                f'floor constraint active '
+                f'(global EE Z ≈ {self.last_rik_pose["position"][2]:.3f} m, '
+                f'floor {self.__floor_z:.3f} m)')
 
-        if (input_position_difference > self.MAXIMUM_INPUT_POSITION_CHANGE):
-            if not self.__change_scaling:
-                self.__stop_tracking()
-
-                rospy.logerr(
-                    (
-                        f'/{self.ROBOT_NAME}/teleoperation: '
-                        f'\nChange in input POSITION exceeded maximum allowed value! '
-                        f'\n- Current input: {np.round(compensated_input_pose["position"], 3)}'
-                        f'\n- Previous input: {np.round(self.last_relaxed_ik_pose["position"], 3)}'
-                        f'\n- Difference (absolute): {np.round(input_position_difference, 3)}'
-                        f'\n- Allowed difference threshold: {np.round(self.MAXIMUM_INPUT_POSITION_CHANGE, 3)}'
-                        '\nStopped input tracking.\n'
-                    ),
-                )
-
-                return
-
-            self.__calculate_compensation()
-
-            compensated_input_pose['position'] = (
-                self.__input_pose['position']
-                - self.input_relaxed_ik_difference['position']
-            )
-
-            # Use fixed (last commanded) orientation.
-            compensated_input_pose['orientation'] = (
-                self.last_relaxed_ik_pose['orientation']
-            )
-
-            # Fixed orientation:
-            if self.__control_mode == 'fixed_front':
-                compensated_input_pose['orientation'] = np.array(
-                    [0.5, 0.5, 0.5, 0.5]
-                )
-
-            elif self.__control_mode == 'fixed_top':
-                compensated_input_pose['orientation'] = np.array(
-                    [0.0, -0.707, -0.707, 0.0]
-                )
-
-            self.__change_scaling = False
-
-        # Protection against too big angular input changes. Controller loses
-        # connection, goes out-of-sight, goes into a sleep mode,  user input is
-        # unsafe.
-        input_orientation_missalignment = transformations.quaternion_multiply(
-            transformations.quaternion_inverse(
-                compensated_input_pose['orientation'],
-            ),
-            self.last_relaxed_ik_pose['orientation'],
-        )
-
-        input_angular_difference = round(
-            np.rad2deg(
-                2 * np.arctan2(
-                    np.linalg.norm(input_orientation_missalignment[1:4]),
-                    input_orientation_missalignment[0],
-                )
-            ),
-            2,
-        )
-
-        if input_angular_difference > 180:
-            input_angular_difference = 360 - input_angular_difference
-
-        if (input_angular_difference > self.MAXIMUM_INPUT_ORIENTATION_CHANGE):
-            self.__stop_tracking()
-
+        # ── Position jump protection ─────────────────────────────────────────
+        # Comparison uses ref_pose (same frame as comp) — no frame mixing.
+        pos_diff = np.linalg.norm(comp['position'] - ref['position'])
+        if pos_diff > self.MAX_POS_CHANGE:
+            self.__stop_tracking_internal()
             rospy.logerr(
-                (
-                    f'/{self.ROBOT_NAME}/teleoperation: '
-                    f'\nChange in input ORIENTATION exceeded maximum allowed value! '
-                    f'\n- Current input: {np.round(compensated_input_pose["orientation"], 3)}'
-                    f'\n- Previous input: {np.round(self.last_relaxed_ik_pose["orientation"], 3)}'
-                    f'\n- Difference (absolute): {np.round(input_angular_difference, 3)}'
-                    f'\n- Allowed difference threshold: {np.round(self.MAXIMUM_INPUT_ORIENTATION_CHANGE, 3)}'
-                    '\nStopped input tracking.\n'
-                ),
-            )
-
+                f'/{self.ROBOT_NAME}/teleoperation: '
+                f'position jump {pos_diff:.3f} m — tracking stopped.')
             return
 
-        # Prepare compensated_pose (target_pose) for convertion to
-        # kinova/base_link frame:
-        target_pose_stamped = PoseStamped()
-        target_pose_stamped.header.stamp = rospy.Time.now()
-        target_pose_stamped.header.frame_id = 'base_link'
-        target_pose_stamped.pose.position.x = (
-            compensated_input_pose['position'][0]
-        )
-        target_pose_stamped.pose.position.y = (
-            compensated_input_pose['position'][1]
-        )
-        target_pose_stamped.pose.position.z = (
-            compensated_input_pose['position'][2]
-        )
+        # ── Orientation jump protection ──────────────────────────────────────
+        q_err = transformations.quaternion_multiply(
+            transformations.quaternion_inverse(comp['orientation']),
+            ref['orientation'])
+        ang = np.rad2deg(2 * np.arctan2(np.linalg.norm(q_err[1:4]), q_err[0]))
+        if ang > 180:
+            ang = 360 - ang
+        if ang > self.MAX_ORI_CHANGE:
+            self.__stop_tracking_internal()
+            rospy.logerr(
+                f'/{self.ROBOT_NAME}/teleoperation: '
+                f'orientation jump {ang:.1f}° — tracking stopped.')
+            return
 
-        target_pose_stamped.pose.orientation.w = (
-            compensated_input_pose['orientation'][0]
-        )
-        target_pose_stamped.pose.orientation.x = (
-            compensated_input_pose['orientation'][1]
-        )
-        target_pose_stamped.pose.orientation.y = (
-            compensated_input_pose['orientation'][2]
-        )
-        target_pose_stamped.pose.orientation.z = (
-            compensated_input_pose['orientation'][3]
-        )
+        # ── Publish to relaxed-IK ─────────────────────────────────────────────
 
-        # Convert target_pose (compensated pose) from base_link to
-        # kinova/base_link:
-        try:
-            # NOTE: Requires import tf2_geometry_msgs to work.
-            pose_in_base_link = self.__tf_buffer.transform(
-                object_stamped=target_pose_stamped,
-                target_frame=f'{self.ROBOT_NAME}/base_link',
-            )
+        if self.INPUT_POSE_FRAME == 'arm_local':
+            # comp is already in {robot_name}/base_link → publish directly
+            pose_msg = Pose()
+            pose_msg.position.x    = float(comp['position'][0])
+            pose_msg.position.y    = float(comp['position'][1])
+            pose_msg.position.z    = float(comp['position'][2])
+            pose_msg.orientation.w = float(comp['orientation'][0])
+            pose_msg.orientation.x = float(comp['orientation'][1])
+            pose_msg.orientation.y = float(comp['orientation'][2])
+            pose_msg.orientation.z = float(comp['orientation'][3])
+            goals = EEPoseGoals()
+            goals.ee_poses.append(pose_msg)
+            goals.ee_poses.append(pose_msg)
+            self.__pub_rik.publish(goals)
 
-            pose_message = Pose()
-            pose_message.position.x = pose_in_base_link.pose.position.x
-            pose_message.position.y = pose_in_base_link.pose.position.y
-            pose_message.position.z = pose_in_base_link.pose.position.z
+            # Keep _local_rik_pose in sync with our commands (used by jump
+            # check and floor constraint on the next tick).
+            self._local_rik_pose = {
+                'position':    comp['position'].copy(),
+                'orientation': comp['orientation'].copy(),
+            }
+            # Keep last_rik_pose (global) updated so the floor Z comparison
+            # remains valid even while tracking in arm_local mode.
+            try:
+                stamped = PoseStamped()
+                stamped.header.stamp    = rospy.Time(0)
+                stamped.header.frame_id = f'{self.ROBOT_NAME}/base_link'
+                stamped.pose.position.x    = float(comp['position'][0])
+                stamped.pose.position.y    = float(comp['position'][1])
+                stamped.pose.position.z    = float(comp['position'][2])
+                stamped.pose.orientation.w = float(comp['orientation'][0])
+                stamped.pose.orientation.x = float(comp['orientation'][1])
+                stamped.pose.orientation.y = float(comp['orientation'][2])
+                stamped.pose.orientation.z = float(comp['orientation'][3])
+                pg = self.__tf_buf.transform(stamped, 'base_link')
+                self.last_rik_pose = {
+                    'position': np.array([
+                        pg.pose.position.x,
+                        pg.pose.position.y,
+                        pg.pose.position.z,
+                    ]),
+                    'orientation': np.array([
+                        pg.pose.orientation.w,
+                        pg.pose.orientation.x,
+                        pg.pose.orientation.y,
+                        pg.pose.orientation.z,
+                    ]),
+                }
+            except Exception as ex:
+                rospy.logwarn_throttle(
+                    1, f'/{self.ROBOT_NAME}/teleoperation: global pose sync: {ex}')
 
-            pose_message.orientation.x = pose_in_base_link.pose.orientation.x
-            pose_message.orientation.y = pose_in_base_link.pose.orientation.y
-            pose_message.orientation.z = pose_in_base_link.pose.orientation.z
-            pose_message.orientation.w = pose_in_base_link.pose.orientation.w
+        else:
+            # base_link mode: transform comp from global to arm-local frame
+            stamped = PoseStamped()
+            stamped.header.stamp    = rospy.Time(0)
+            stamped.header.frame_id = 'base_link'
+            stamped.pose.position.x    = float(comp['position'][0])
+            stamped.pose.position.y    = float(comp['position'][1])
+            stamped.pose.position.z    = float(comp['position'][2])
+            stamped.pose.orientation.w = float(comp['orientation'][0])
+            stamped.pose.orientation.x = float(comp['orientation'][1])
+            stamped.pose.orientation.y = float(comp['orientation'][2])
+            stamped.pose.orientation.z = float(comp['orientation'][3])
 
-            ee_pose_goals = EEPoseGoals()
-            ee_pose_goals.ee_poses.append(pose_message)
-            ee_pose_goals.ee_poses.append(pose_message)
+            try:
+                p = self.__tf_buf.transform(
+                    object_stamped=stamped,
+                    target_frame=f'{self.ROBOT_NAME}/base_link')
+                pose_msg = Pose()
+                pose_msg.position.x    = p.pose.position.x
+                pose_msg.position.y    = p.pose.position.y
+                pose_msg.position.z    = p.pose.position.z
+                pose_msg.orientation.x = p.pose.orientation.x
+                pose_msg.orientation.y = p.pose.orientation.y
+                pose_msg.orientation.z = p.pose.orientation.z
+                pose_msg.orientation.w = p.pose.orientation.w
+                goals = EEPoseGoals()
+                goals.ee_poses.append(pose_msg)
+                goals.ee_poses.append(pose_msg)
+                self.__pub_rik.publish(goals)
 
-            self.__relaxed_ik_target.publish(ee_pose_goals)
+                # Keep last_rik_pose in sync with our commands (global frame).
+                self.last_rik_pose = {
+                    'position':    comp['position'].copy(),
+                    'orientation': comp['orientation'].copy(),
+                }
 
-        except Exception as ex:
-            rospy.logerr_throttle(
-                1, f'/{self.ROBOT_NAME}/teleoperation:'
-                f'\nError in __publish_kinova_pose: {ex}'
-            )
-
-    def __transform_lookup(
-        self,
-        buffer: tf2_ros.Buffer,
-        from_frame: str,
-        to_frame: str,
-    ):
-        """
-
-        """
-
-        try:
-            transform = buffer.lookup_transform(
-                target_frame=from_frame,
-                source_frame=to_frame,
-                time=rospy.Time(0),
-            )
-
-            return transform
-
-        except Exception as ex:
-            # rospy.logerr_throttle(
-            #     1,
-            #     f'/{self.ROBOT_NAME}/teleoperation:'
-            #     f'\nError in __transform_lookup: {ex}',
-            # )
-            return None
-
-    def __get_relaxed_ik_last_pose(self):
-        """
-        
-        """
-
-        # Get current relaxed_ik_target transform in base_link frame:
-        # Position:
-        transform = self.__transform_lookup(
-            self.__tf_buffer,
-            'base_link',
-            f'{self.ROBOT_NAME}/relaxed_ik_target',
-        )
-
-        if transform:
-            position = np.array(
-                [
-                    transform.transform.translation.x,
-                    transform.transform.translation.y,
-                    transform.transform.translation.z,
-                ]
-            )
-            orientation = np.array(
-                [
-                    transform.transform.rotation.w,
-                    transform.transform.rotation.x,
-                    transform.transform.rotation.y,
-                    transform.transform.rotation.z,
-                ]
-            )
-
-            self.last_relaxed_ik_pose = {}
-            self.last_relaxed_ik_pose['position'] = position
-            self.last_relaxed_ik_pose['orientation'] = orientation
-
-    def __pause_relaxed_ik(self):
-        """
-        
-        """
-
-        self.__enable_pid(False)
-
-    def __resume_relaxed_ik(self):
-        """
-        
-        """
-
-        self.__reset_rik()
-        self.__enable_pid(True)
-
-    def __reset_relaxed_ik(self):
-        """
-        
-        """
-
-        self.__pause_relaxed_ik()
-        self.__clear_arm_faults()
-        self.__resume_relaxed_ik()
+            except Exception as ex:
+                rospy.logerr_throttle(
+                    1, f'/{self.ROBOT_NAME}/teleoperation: publish pose: {ex}')
 
     def __velocity_from_deviation(
         self,
-        current: np.ndarray,
-        setpoint: np.ndarray,
-        axis_scale: np.ndarray,
-        dead_zone_radius: float = 0.0,
-        max_speed: np.ndarray = np.array([1.0, 1.0, 1.0]),
-    ) -> np.ndarray:
-        """
-        Compute a velocity vector based on position deviation with:
-        - spherical dead zone (no motion inside the radius),
-        - per-axis scaling gains.
-
-        Args:
-            current:   np.array([x, y, z])  current position
-            setpoint:  np.array([x, y, z])  reference position (node shell)
-            axis_scale:np.array([sx, sy, sz]) per-axis scaling (velocity per unit error)
-            dead_zone_radius: float, radius of the zero-velocity sphere around the setpoint
-            max_speed: optional np.array([vx, vy, vz]) per-axis speed limits (abs clamp)
-
-        Returns:
-            np.array([vx, vy, vz]) velocity command
-        """
-        current = np.asarray(current, dtype=float)
-        setpoint = np.asarray(setpoint, dtype=float)
+        current,
+        setpoint,
+        axis_scale,
+        dead_zone_radius=0.0,
+        max_speed=np.array([1., 1., 1.]),
+    ):
+        """Velocity proportional to distance outside a dead-zone sphere."""
+        current    = np.asarray(current,    dtype=float)
+        setpoint   = np.asarray(setpoint,   dtype=float)
         axis_scale = np.asarray(axis_scale, dtype=float)
 
-        # Deviation vector and distance from setpoint
-        e = current - setpoint
+        e    = current - setpoint
         dist = np.linalg.norm(e)
 
-        # Inside the dead zone: no motion
-        if dist <= dead_zone_radius or dist == 0.0:
+        if dist <= dead_zone_radius or dist == 0.:
             return np.zeros(3, dtype=float)
 
-        # How far outside the dead zone we are (scalar)
-        excess = dist - dead_zone_radius
-
-        # Direction from setpoint to current
-        direction = e / dist  # unit vector
-
-        # Scale velocity so that magnitude grows linearly with how far outside the dead zone.
-        # Start with an isotropic magnitude (excess) along 'direction', then apply per-axis gains.
-        # Result: v = (excess * direction) ⊙ axis_scale
+        excess    = dist - dead_zone_radius
+        direction = e / dist
         v = (excess * direction) * axis_scale
 
-        # Optional per-axis saturation
         if max_speed is not None:
             max_speed = np.asarray(max_speed, dtype=float)
             v = np.clip(v, -np.abs(max_speed), np.abs(max_speed))
 
         return v
 
-    # # Public methods:
+    # ─────────────────────────────────────────────────────────────────────────
+    # Public
+    # ─────────────────────────────────────────────────────────────────────────
+
     def main_loop(self):
-        """
-        
-        """
-
         self.__check_initialization()
+        self.__publish_current_pose()
+        self.__publish_current_pose_local()
+        self.__publish_floor_z_effective()
 
-        if not self.__is_initialized:
+        if not self.__is_init:
             return
-
-        if self.__allow_tracking:
-            self.__tracking_state_machine()
-
-        self.__gripper_state_machine()
-        self.__mode_state_machine()
 
         if self.__pose_tracking:
             self.__publish_kinova_pose()
 
-        self.__is_tracking.publish(self.__pose_tracking)
-
-        self.__position_only.publish(
-            self.__control_mode in [
-                'position',
-                'fixed_top',
-                'fixed_front',
-            ]
-        )
+        rospy.logdebug_throttle(
+            1.0,
+            f'/{self.ROBOT_NAME}/teleoperation: '
+            f'is_tracking={self.__pose_tracking}  '
+            f'input_pose=({self.__input_pose["position"][0]:.3f},'
+            f'{self.__input_pose["position"][1]:.3f},'
+            f'{self.__input_pose["position"][2]:.3f})')
+        self.__pub_is_tracking.publish(self.__pose_tracking)
+        self.__pub_pos_only.publish(
+            self.__control_mode in ('position', 'velocity', 'fixed_front', 'fixed_top'))
 
     def node_shutdown(self):
-        """
-        
-        """
-
         rospy.loginfo_once(
-            f'/{self.ROBOT_NAME}/teleoperation node is shutting down...',
-        )
-
-        # TODO: Stop the arm motion.
-        # self.__stop_arm()
-
-        rospy.loginfo_once(
-            f'/{self.ROBOT_NAME}/teleoperation: node has shut down.',
-        )
+            f'/{self.ROBOT_NAME}/teleoperation: shutting down.')
 
 
 def main():
-    """
+    rospy.init_node('teleoperation', log_level=rospy.INFO)
+    rospy.loginfo('\n\n\n\n\n')
 
-    """
+    rn   = rospy.get_param(f'{rospy.get_name()}/robot_name',                      'my_gen3')
+    co   = rospy.get_param(f'{rospy.get_name()}/compensate_orientation',          True)
+    mpc  = rospy.get_param(f'{rospy.get_name()}/maximum_input_position_change',   0.1)
+    moc  = rospy.get_param(f'{rospy.get_name()}/maximum_input_orientation_change',30)
+    cc   = literal_eval(rospy.get_param(
+        f'{rospy.get_name()}/convenience_compensation', '[0.0, 0.0, 0.0]'))
+    freq = rospy.get_param(f'{rospy.get_name()}/node_frequency', 1000)
+    # 'base_link' (default): input_pose in global frame; TF transform applied.
+    # 'arm_local': input_pose already in {robot_name}/base_link; no TF.
+    #   Requires the joystick mapping to read current_ee_pose_local and the
+    #   teleoperation launch file to set this parameter.
+    ipf  = rospy.get_param(f'{rospy.get_name()}/input_pose_frame', 'base_link')
 
-    rospy.init_node(
-        'teleoperation',
-        log_level=rospy.INFO,  # TODO: Make this a launch file parameter.
+    node = KinovaTeleoperation(
+        robot_name=rn,
+        compensate_orientation=co,
+        convenience_compensation=cc,
+        maximum_input_position_change=mpc,
+        maximum_input_orientation_change=moc,
+        input_pose_frame=ipf,
     )
-
-    rospy.loginfo('\n\n\n\n\n')  # Add whitespaces to separate logs.
-
-    # # ROS parameters:
-    # TODO: Add type check.
-    node_frequency = rospy.get_param(
-        param_name=f'{rospy.get_name()}/node_frequency',
-        default=1000,
-    )
-
-    kinova_name = rospy.get_param(
-        param_name=f'{rospy.get_name()}/robot_name',
-        default='my_gen3',
-    )
-
-    tracking_mode = rospy.get_param(
-        param_name=f'{rospy.get_name()}/tracking_mode',
-        default='toggle',
-    )
-
-    compensate_orientation = rospy.get_param(
-        param_name=f'{rospy.get_name()}/compensate_orientation',
-        default=True,
-    )
-
-    maximum_input_position_change = rospy.get_param(
-        param_name=f'{rospy.get_name()}/maximum_input_position_change',
-        default=0.1,
-    )
-
-    maximum_input_orientation_change = rospy.get_param(
-        param_name=f'{rospy.get_name()}/maximum_input_orientation_change',
-        default=30,
-    )
-
-    convenience_compensation = literal_eval(
-        rospy.get_param(
-            param_name=f'{rospy.get_name()}/convenience_compensation',
-            default='[0.0, 0.0, 0.0]',
-        )
-    )
-
-    kinova_teleoperation = KinovaTeleoperation(
-        robot_name=kinova_name,
-        tracking_mode=tracking_mode,
-        compensate_orientation=compensate_orientation,
-        convenience_compensation=convenience_compensation,
-        maximum_input_position_change=maximum_input_position_change,
-        maximum_input_orientation_change=maximum_input_orientation_change,
-    )
-
-    rospy.on_shutdown(kinova_teleoperation.node_shutdown)
-    node_rate = rospy.Rate(node_frequency)
-
+    rospy.on_shutdown(node.node_shutdown)
+    rate = rospy.Rate(freq)
     while not rospy.is_shutdown():
-        kinova_teleoperation.main_loop()
-        node_rate.sleep()
+        node.main_loop()
+        rate.sleep()
 
 
 if __name__ == '__main__':

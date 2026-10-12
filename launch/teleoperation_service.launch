@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- ============================ SETTINGS ============================= -->
+
+    <arg name="robot_name"                          default="my_gen3"/>
+    <arg name="compensate_orientation"              default="true"/>
+    <arg name="convenience_compensation"            default="[0.0, 0.0, 0.0]"/>
+    <arg name="maximum_input_position_change"       default="0.1"/>
+    <arg name="maximum_input_orientation_change"    default="20"/>
+    <arg name="node_frequency"                      default="1000"/>
+
+    <!-- Set any of these to "false" if launched separately -->
+    <arg name="launch_joints_control"               default="true"/>
+    <arg name="launch_relaxed_ik"                   default="true"/>
+    <arg name="launch_gripper_control"              default="true"/>
+
+    <!-- ======================== END OF SETTINGS ========================== -->
+
+    <group ns="/$(arg robot_name)">
+
+        <!-- Joints control (dependency): -->
+        <group if="$(arg launch_joints_control)">
+            <include file="$(find kinova_positional_control)/launch/joints_control.launch">
+                <arg name="robot_name" value="$(arg robot_name)"/>
+            </include>
+        </group>
+
+        <!-- Relaxed IK (dependency): -->
+        <group if="$(arg launch_relaxed_ik)">
+            <include file="$(find relaxed_ik_ros1)/launch/relaxed_ik.launch">
+                <arg name="robot_name"      value="$(arg robot_name)"/>
+                <arg name="settings_file"   value="$(arg robot_name)_settings.yaml"/>
+            </include>
+        </group>
+
+        <!-- Gripper control (dependency): -->
+        <group if="$(arg launch_gripper_control)">
+            <include file="$(find kinova_positional_control)/launch/gripper_control.launch">
+                <arg name="robot_name" value="$(arg robot_name)"/>
+            </include>
+        </group>
+
+        <!-- Service-driven teleoperation node -->
+        <node pkg="kinova_positional_control"
+              type="teleoperation.py"
+              name="teleoperation"
+              output="screen">
+            <param name="robot_name"                        value="$(arg robot_name)"/>
+            <param name="compensate_orientation"            value="$(arg compensate_orientation)"/>
+            <param name="convenience_compensation"          value="$(arg convenience_compensation)"/>
+            <param name="maximum_input_position_change"     value="$(arg maximum_input_position_change)"/>
+            <param name="maximum_input_orientation_change"  value="$(arg maximum_input_orientation_change)"/>
+            <param name="node_frequency"                    value="$(arg node_frequency)"/>
+        </node>
+
+    </group>
+
+</launch>

@@ -42,6 +42,13 @@ from std_srvs.srv import (Empty)
 from moveit_msgs.msg import (DisplayTrajectory)
 
 
+# How often the static collision boxes are re-applied to the planning scene, in
+# seconds.  The boxes never change, so this only exists to restore them if
+# move_group is restarted underneath us.  Applying them every main_loop tick
+# floods move_group with apply_planning_scene calls.
+SCENE_REFRESH_PERIOD_S = 5.0
+
+
 class PresetPoses:
     """
     
@@ -68,6 +75,7 @@ class PresetPoses:
         # NOTE: By default all new class variables should be private.
         self.__move_group_is_initialized = False
         self.__plan = None
+        self.__last_scene_refresh = 0.0
 
         self.__trajectory_plan_fraction = 0.0
         self.__trajectory_execution_finished = True
@@ -112,6 +120,11 @@ class PresetPoses:
             f'/{self.__ROBOT_NAME}/preset_poses/narrow_pose',
             Empty,
             self.__narrow_pose_handler,
+        )
+        rospy.Service(
+            f'/{self.__ROBOT_NAME}/preset_poses/narrow_bent_pose',
+            Empty,
+            self.__narrow_bent_pose_handler,
         )
         rospy.Service(
             f'/{self.__ROBOT_NAME}/preset_poses/home_pose',
@@ -179,6 +192,42 @@ class PresetPoses:
         # # TF listener:
         self.__tf_buffer = tf2_ros.Buffer(rospy.Duration(1))
         tf2_ros.TransformListener(self.__tf_buffer)
+
+    def __narrow_bent_pose_handler(self, request):
+        """
+        
+        """
+
+        target_pose = Pose()
+        target_pose.position.x = 0.5
+        target_pose.position.y = -0.1
+        # Raised 10 cm from -0.35 to clear more of the workspace on the way in,
+        # which makes this a safer homing position.
+        target_pose.position.z = -0.25
+
+        rpy_deg = np.deg2rad(np.array([90, 0, 90 + 10 + 45]))
+
+        if self.__ROBOT_NAME == 'left_arm':
+            rpy_deg = np.deg2rad(np.array([90, 0, 90 - 10 - 45]))
+            target_pose.position.y = -target_pose.position.y
+
+        quaternion = tf.quaternion_from_euler(
+            rpy_deg[0],
+            rpy_deg[1],
+            rpy_deg[2],
+        )
+
+        target_pose.orientation.x = quaternion[0]
+        target_pose.orientation.y = quaternion[1]
+        target_pose.orientation.z = quaternion[2]
+        target_pose.orientation.w = quaternion[3]
+
+        self.__set_target_pose(
+            target_pose=target_pose,
+            target_frame='chest_link',
+        )
+
+        return []
 
     # # Dependency status callbacks:
     # NOTE: each dependency topic should have a callback function, which will
@@ -748,8 +797,8 @@ class PresetPoses:
         self,
         target_pose: Pose,
         target_frame: str,
-        velocity_scaling_factor: float = 1.0,
-        acceleration_scaling_factor: float = 0.75,
+        velocity_scaling_factor: float = 0.2, # was 1.0,
+        acceleration_scaling_factor: float = 0.2 # was 0.75,
     ):
         """
 
@@ -774,7 +823,7 @@ class PresetPoses:
                 if target_reached:
                     break
 
-                eef_step = 0.005
+                eef_step = 0.01 # was 0.005
                 best_eef_step = 0.0
                 best_fraction = 0.0
                 best_plan = None
@@ -867,9 +916,18 @@ class PresetPoses:
             self.__display_trajectory_pub.publish(display_trajectory)
 
     def __update_scene(self):
+        """Re-apply the static collision boxes, at most once per refresh period.
+
+        Called from main_loop, which runs at node_frequency (100 Hz by default).
+        Each add_box is a synchronous apply_planning_scene call into move_group,
+        so applying them every tick puts hundreds of service calls per second on
+        move_group for geometry that never changes.
         """
-        
-        """
+
+        now = rospy.Time.now().to_sec()
+        if now - self.__last_scene_refresh < SCENE_REFRESH_PERIOD_S:
+            return
+        self.__last_scene_refresh = now
 
         box_pose_stamped = PoseStamped()
         box_pose_stamped.header.stamp = rospy.Time.now()
