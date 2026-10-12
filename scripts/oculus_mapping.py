@@ -599,8 +599,14 @@ class OculusMapping:
                 if angular_difference > 180:
                     angular_difference = round(360 - angular_difference, 2)
 
+                rospy.logwarn_throttle(
+                    1,
+                    (f'\n{positional_difference=}'
+                     f'\n{angular_difference=}')
+                )
+
                 # Relaxed IK has succefully finished repositioning.
-                if (positional_difference < 0.001 and angular_difference < 2):
+                if (positional_difference < 0.02 and angular_difference < 25):
                     self.__preset_pose_selection_mode = False
                     self.__preset_poses_state_machine_state = 0
 

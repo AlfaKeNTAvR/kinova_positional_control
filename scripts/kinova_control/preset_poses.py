@@ -211,7 +211,7 @@ class PresetPoses:
 
         self.__set_target_pose(
             target_pose=target_pose,
-            target_frame='chest_link',
+            target_frame='torso_top_plate',
         )
 
         return []
@@ -245,7 +245,7 @@ class PresetPoses:
 
         self.__set_target_pose(
             target_pose=target_pose,
-            target_frame='chest_link',
+            target_frame='torso_top_plate',
         )
 
         return []
@@ -278,7 +278,7 @@ class PresetPoses:
 
         self.__set_target_pose(
             target_pose=target_pose,
-            target_frame='chest_link',
+            target_frame='torso_top_plate',
         )
 
         return []
@@ -748,6 +748,7 @@ class PresetPoses:
                     (plan, fraction) = self.__arm_group.compute_cartesian_path(
                         waypoints=waypoints,
                         eef_step=eef_step,
+                        jump_threshold=5.0,
                     )
 
                     eef_step += 0.001
@@ -848,6 +849,40 @@ class PresetPoses:
             name='mobile_base',
             pose=box_pose_stamped,
             size=(0.58, 0.54, 0.36),
+        )
+
+        box_pose_stamped = PoseStamped()
+        box_pose_stamped.header.stamp = rospy.Time.now()
+        box_pose_stamped.header.frame_id = 'torso_bottom_plate'
+        box_pose_stamped.pose.position.x = 0
+        box_pose_stamped.pose.position.y = 0
+        box_pose_stamped.pose.position.z = 0.5/2
+        box_pose_stamped.pose.orientation.x = 0
+        box_pose_stamped.pose.orientation.y = 0
+        box_pose_stamped.pose.orientation.z = 0
+        box_pose_stamped.pose.orientation.w = 1
+
+        self.__scene.add_box(
+            name='torso',
+            pose=box_pose_stamped,
+            size=(0.12, 0.12, 0.5),
+        )
+
+        box_pose_stamped = PoseStamped()
+        box_pose_stamped.header.stamp = rospy.Time.now()
+        box_pose_stamped.header.frame_id = 'stand_link'
+        box_pose_stamped.pose.position.x = -0.18
+        box_pose_stamped.pose.position.y = 0
+        box_pose_stamped.pose.position.z = 1.45/2
+        box_pose_stamped.pose.orientation.x = 0
+        box_pose_stamped.pose.orientation.y = 0
+        box_pose_stamped.pose.orientation.z = 0
+        box_pose_stamped.pose.orientation.w = 1
+
+        self.__scene.add_box(
+            name='stand',
+            pose=box_pose_stamped,
+            size=(0.2, 0.4, 1.45),
         )
 
     # # Public methods:

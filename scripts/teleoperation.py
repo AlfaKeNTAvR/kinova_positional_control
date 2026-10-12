@@ -113,7 +113,7 @@ class KinovaTeleoperation:
 
         self.__open_gripper_position = 0.0
         self.__close_gripper_position = 1.0
-        self.__gripper_mode = 'force'  # 'position' or 'force'
+        self.__gripper_mode = 'position'  # 'position' or 'force'
 
         # # Initialization and dependency status topics:
         self.__is_initialized = False
